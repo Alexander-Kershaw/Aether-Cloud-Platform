@@ -75,6 +75,10 @@ def _load_env_file(path: Path) -> dict[str, str]:
 def _docker_exec(container: str, args: list[str]) -> int:
     return _run(["docker", "exec", "-it", container, *args])
 
+# Redpanda helper
+def _rpk(args: list[str]) -> int:
+    return _run(["docker", "exec", "-it", "acp-redpanda", "rpk", *args])
+
 
 
 # COMMAND DEFINITIONS
@@ -213,3 +217,27 @@ def ls(prefix: str = typer.Argument(..., help="MinIO prefix, e.g. bronze/acp/sam
         "-lc", script
     ])
     raise typer.Exit(code=rc)
+
+# List Kafka topics (Redpanda)
+@app.command()
+def topics() -> None:
+    raise typer.Exit(code=_rpk(["topic", "list"]))
+
+# Redpanda test: Produce N simple messages to a topic
+@app.command()
+def produce(
+    topic: str,
+    n: int = typer.Option(10, help="Number of messages"),
+    prefix: str = typer.Option("event_", help="Message prefix"),
+) -> None:
+    script = f'for i in $(seq 1 {n}); do echo "{prefix}$i"; done | rpk topic produce {topic} --brokers redpanda:9092'
+    rc = _run(["docker", "exec", "-i", "acp-redpanda", "bash", "-lc", script])
+    raise typer.Exit(code=rc)
+
+# Redpanda test: Consume N messages from a topic
+@app.command()
+def consume(
+    topic: str,
+    n: int = typer.Option(10, help="Number of messages"),
+) -> None:
+    raise typer.Exit(code=_rpk(["topic", "consume", topic, "--brokers", "redpanda:9092", "-n", str(n)]))
