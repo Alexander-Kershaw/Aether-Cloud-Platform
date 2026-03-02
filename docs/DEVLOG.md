@@ -206,3 +206,156 @@ Redpanda provides the Kafka API without the heavier operational footprint of Zoo
 
 ---
 
+## Spark cluster online
+
+### Objective
+Bring up a Spark cluster (master and worker) and prove it can run a real job that writes **Parquet** into the MinIO `aether-lakehouse` bucket.
+
+Iceberg was not implemented at this stage. Focus is on: **compute → object storage → verify**.
+
+---
+
+## Review of what ACP is so far (MinIO + Redpanda + Spark)
+
+ACP is a local cloud platform. It runs a small set of core services that future planned projects (ODIN, CHRONOS, etc.) will plug into.
+
+So far, three essential building blocks are online:
+
+### 1) MinIO (S3-style object storage)
+**What it is:** MinIO is an object store that speaks the same API as AWS S3.  
+**Why MinIO:** In modern data platforms, the data lake is predominantly object storage (S3). It’s cost effective, scalable, and fits both batch and streaming pipelines.
+
+**How it works in ACP:**
+- Run MinIO in Docker.
+- Created a bucket called `aether-lakehouse`.
+- Inside that bucket enforced a lake layout: `bronze/`, `silver/`, `gold/`.
+- Spark writes files to paths like:
+
+  `s3a://aether-lakehouse/bronze/acp/sample_events/dt=YYYY-MM-DD/*.parquet`
+
+**Important note:** Object storage (S3) is not a normal filesystem, You write to it via the S3 API.
+
+---
+
+### 2) Redpanda (Kafka-compatible streaming)
+**What it is:** Redpanda is a Kafka-compatible streaming broker.
+**Why Redpanda:** Streaming is how platforms can handle high-volume event data (flight events, meter readings, logs). Instead of writing files directly, producers publish events to a topic; consumers read those events and process them.
+
+**How it works in ACP:**
+- Run Redpanda in Docker.
+- Created a baseline topic: `aether.events`.
+- Verified it by producing and consuming messages reliably.
+- This forms the basis for later milestones where Spark Streaming will read from Kafka topics and write to Iceberg tables.
+
+---
+
+### 3) Spark (distributed compute)
+**What it is:** Spark is a distributed compute engine for big data. It can run:
+- batch jobs (read data, transform it, write results)
+- streaming jobs (continuously process Kafka topics)
+
+**Why Spark:** Spark is ACP's Elastic MapReduce equivalent compute layer.
+It’s how:
+- raw events in Kafka are ingested into bronze tables
+- bronze into silver aggregates
+- silver into gold metrics and rankings
+
+**How it works in ACP:**
+- Run a Spark **Standalone cluster** (master + worker).
+- The master schedules work, the worker executes tasks.
+- You can submit a job into the cluster with `spark-submit`.
+- In ACP, this is wrapped behind the CLI so it’s a one-liner job execution.
+
+---
+
+## What was done
+
+### Services online (Spark cluster)
+- `spark-master`: Spark scheduler + UI
+- `spark-worker-1`: executes Spark tasks
+
+### Scripts / logic
+- A small Spark job (`scripts/spark_write_parquet.py`) that:
+  1) generates 100 synthetic rows
+  2) prints `ROW_COUNT=100` (verification)
+  3) writes Parquet to MinIO under a date partition (`dt=...`)
+  4) prints `WROTE_PARQUET_TO=...` (verification)
+
+### CLI improvements
+Added CLI commands to avoid giant, fragile commands:
+
+- `aether spark-run scripts/spark_write_parquet.py`
+  - runs `spark-submit` inside the Spark master container
+  - injects the required S3A configuration (endpoint + credentials)
+  - hides the long `--packages` and `--conf` boilerplate
+
+- `aether ls bronze/acp/sample_events`
+  - lists objects in MinIO using `mc`
+  - used for deterministic verification of the file successfully entering the bronze layer of the `aether-lakehouse` bucket in MinIO 
+
+---
+
+## Why these design choices
+### Why Parquet first, not Iceberg?
+Iceberg adds many extra moving parts (catalog + metadata + table semantics).
+Before adding that complexity, I wanted to prove a simpler truth:
+**Spark can write to MinIO reliably.**
+That makes later Iceberg failures easier to isolate in future implementation.
+
+### Why inject S3 config at submit time?
+I avoided baking credentials into images or hardcoding them into config files.
+Instead, the CLI reads `.env` and injects:
+- endpoint: `http://minio:9000` (inside Docker network)
+- access key / secret key
+- path-style access and SSL settings suitable for MinIO
+This keeps the cluster configuration clean and portable.
+
+### Why the CLI needed `.env` interpolation?
+Docker Compose expands values like:
+`AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}`
+
+But the CLI is a separate program and must interpret `.env` too.
+Without interpolation, the CLI might pass literal strings like `${MINIO_ROOT_USER}` as credentials, which leads to authentication failures.
+
+---
+
+## Problems hit and solutions
+
+### 1) Spark write initially failed with 403 Forbidden
+**Symptom:** Spark could run, but writing to S3A gave `403 Forbidden`.  
+**Cause:** CLI `.env` loader did not expand `${VAR}` references. Credentials were wrong.  
+**Fix:** Implement `${VAR}` interpolation in the CLI `.env` parsing, so Compose-style `.env` works everywhere.
+
+### 2) `aether ls` initially didn’t list anything useful
+**Symptom:** I saw “Added alias successfully” but no listing output.  
+**Cause:** `mc alias set` was executed in one ephemeral container and the `mc ls` ran in another. Aliases aren’t shared across containers.  
+**Fix:** Run alias setup and listing in the same `docker run ... /bin/sh -lc` invocation.
+
+---
+
+## Verification
+
+### Commands
+- `aether spark-run scripts/spark_write_parquet.py`
+- `aether ls bronze/acp/sample_events`
+
+### Expected output
+- Spark prints:
+  - `ROW_COUNT=100`
+  - `WROTE_PARQUET_TO=s3a://aether-lakehouse/bronze/acp/sample_events/dt=YYYY-MM-DD/`
+- MinIO listing shows:
+  - `dt=YYYY-MM-DD/_SUCCESS`
+  - `dt=YYYY-MM-DD/part-....snappy.parquet`
+
+### Observed (2026-03-02)
+- `ROW_COUNT=100`
+- `WROTE_PARQUET_TO=s3a://aether-lakehouse/bronze/acp/sample_events/dt=2026-03-02/`
+- `_SUCCESS` and Parquet part file visible via `aether ls` and in the MinIO console
+
+---
+
+**STATUS: COMPLETE**
+
+**Successfully ran spark cluster and proved it can run a real job that writes **Parquet** into the MinIO `aether-lakehouse` bucket.**
+
+---
