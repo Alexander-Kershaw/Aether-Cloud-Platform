@@ -183,3 +183,26 @@ MinIO lakehouse successfully established with `gold/silver/bronze` layered archi
 
 ---
 
+## Streaming (Redpanda) (2026-03-02)
+
+### Objective
+Added Redpanda as ACP’s Kafka-compatible event streaming backbone and Redpanda Console for UI inspection.
+
+A one-shot init container (`rpk-init`) creates the baseline topic `aether.events` at boot, making topic existence part of the platform contract rather than a manual setup step.
+
+### Why Redpanda
+Redpanda provides the Kafka API without the heavier operational footprint of ZooKeeper-era Kafka setups. For ACP this keeps the local platform fast, reproducible, and realistic enough to map cleanly onto cloud Kafka offerings.
+
+### Verification
+- `rpk topic list` shows `aether.events` with 1 partition and 1 replica.
+- Produced 10 messages (`event_1` … `event_10`) and observed offsets 0–9.
+- Consumed the same 10 messages back reliably via `rpk topic consume`.
+
+---
+
+**STATUS: COMPLETE**
+
+**Confirmed message consumption, proved Redpanda service functionality.**
+
+---
+
