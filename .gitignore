@@ -1,0 +1,20 @@
+# local-only runtime data
+data/
+.env
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.dist/
+.build/
+.venv/
+.venv*/
+.envrc
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
