@@ -149,5 +149,37 @@ From this point forward:
 ---
 
 
+## MinIO data lake online (2026-03-02)
 
+### Objective
+Brought up MinIO as the S3-compatible object store for ACP and provisioned the canonical lakehouse bucket (`aether-lakehouse`) via an init-style `mc` container.
+
+This establishes a stable, cloud-like storage substrate so all future systems (Spark, Iceberg, Trino, streaming sinks) can write to a consistent S3 API and a consistent lake layout.
+
+### Design decisions
+- MinIO chosen as the local equivalent of AWS S3 (zero-cost, Docker-friendly, widely supported).
+- An `mc` init container was used to create the bucket deterministically at boot.
+- Lake layout prefixes (`bronze/`, `silver/`, `gold/`) are created immediately to enforce conventions straight away.
+
+### Fix applied
+Initial boot failed due to an invalid pinned `minio/mc` image tag (Docker registry did not publish the specified tag).
+Updated pins to published release tags:
+- `minio/minio:RELEASE.2025-01-20T14-49-07Z`
+- `minio/mc:RELEASE.2025-01-17T23-25-50Z`
+
+### Verification
+- `aether up` brings up MinIO and reports `healthy`.
+- Bucket persisted on the MinIO data volume (`docker exec acp-minio ls /data` shows `aether-lakehouse`).
+- MinIO Console reachable at `http://localhost:9001` and bucket visible.
+- `mc ls` confirms objects/prefixes exist inside the bucket.
+
+---
+
+**STATUS: COMPLETE**
+
+**MinIO S3 lakehouse storage verified**
+
+MinIO lakehouse successfully established with `gold/silver/bronze` layered architecture with deterministic bucket initiation (Init container `apc-mc-init` exits with exit code 0 after bucket creation)
+
+---
 
