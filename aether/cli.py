@@ -8,7 +8,8 @@ import typer
 from rich.console import Console
 from rich.table import Table
 import re
-
+import shlex
+from dataclasses import dataclass
 
 
 app = typer.Typer(add_completion=False, help="AETHER Cloud Platform (ACP) CLI")
@@ -20,6 +21,10 @@ ENV_FILE = REPO_ROOT / ".env"
 
 _VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
+
+#========================================================================================================================    
+# ACP compose command / env loading / docker execution
+#========================================================================================================================
 
 
 def _run(cmd: list[str]) -> int:
@@ -71,17 +76,76 @@ def _load_env_file(path: Path) -> dict[str, str]:
     return {k: expand(v) for k, v in raw.items()}
 
 
-
+# Docker execution
 def _docker_exec(container: str, args: list[str]) -> int:
     return _run(["docker", "exec", "-it", container, *args])
 
+#========================================================================================================================
+# Redpanda 
+#========================================================================================================================
 # Redpanda helper
 def _rpk(args: list[str]) -> int:
     return _run(["docker", "exec", "-it", "acp-redpanda", "rpk", *args])
 
 
+#========================================================================================================================
+# Trino runner
+#========================================================================================================================
 
+@dataclass(frozen=True)
+class TrinoTarget:
+    container: str = "acp-trino"
+    cli_bin: str = "trino"
+
+# Run subprocess, raise typer error on failure
+def _run_sub(cmd: list[str]) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(cmd, check=True, text=True)
+    except subprocess.CalledProcessError as e:
+        raise typer.Exit(code=e.returncode)
+
+# Trino helper (execute SQL inside Trino container)
+def trino_exec(query: str, *, target: TrinoTarget = TrinoTarget()) -> None:
+    cmd = [
+        "docker", "exec", "-i",
+        target.container,
+        target.cli_bin,
+        "--execute", query,
+    ]
+    _run_sub(cmd)
+
+#========================================================================================================================
+# Bronze Utilities
+#========================================================================================================================
+
+bronze_app = typer.Typer(help="Bronze layer utilities (raw external tables)")
+app.add_typer(bronze_app, name="bronze")
+
+
+def _bronze_schema_sql() -> str:
+    return """
+CREATE SCHEMA IF NOT EXISTS raw.bronze
+WITH (location='s3a://aether-lakehouse/bronze/');
+""".strip()
+
+
+def _bronze_create_table_sql(table: str, dt: str) -> str:
+    return f"""
+CREATE TABLE raw.bronze.{table} (
+  event_id bigint,
+  dt varchar
+)
+WITH (
+  external_location='s3a://aether-lakehouse/bronze/acp/sample_events/dt={dt}/',
+  format='PARQUET'
+);
+""".strip()
+
+
+
+#========================================================================================================================
 # COMMAND DEFINITIONS
+#========================================================================================================================
 
 # Start ACP stack
 @app.command()
@@ -101,7 +165,7 @@ def up() -> None:
     console.print("\n[green]ACP containers started.[/green]")
     status()
 
-
+#========================================================================================================================
 # Stop ACP
 @app.command()
 def down() -> None:
@@ -110,6 +174,7 @@ def down() -> None:
     rc = _run(_compose_cmd(["down"]))
     raise typer.Exit(code=rc)
 
+#========================================================================================================================
 
 # Clean ACP restart
 @app.command()
@@ -117,7 +182,7 @@ def restart() -> None:
     down()
     up()
 
-
+#========================================================================================================================
 # Show ACP container status
 @app.command()
 def status() -> None:
@@ -133,6 +198,7 @@ def status() -> None:
     _run(_compose_cmd(["ps"]))
 
 
+#========================================================================================================================
 # Run diagnostics (e.g docker install, env present, port avaliabilty)
 @app.command()
 def doctor() -> None:
@@ -152,7 +218,7 @@ def doctor() -> None:
 
     console.print(table)
 
-
+#========================================================================================================================
 # Run spark job on ACP spark cluster (MinIO and S3A wired in)
 @app.command()
 def spark_run(script_path: str = typer.Argument(..., help="Path under repo root, e.g. scripts/spark_write_parquet.py")) -> None:
@@ -190,7 +256,7 @@ def spark_run(script_path: str = typer.Argument(..., help="Path under repo root,
     rc = _docker_exec("acp-spark-master", cmd)
     raise typer.Exit(code=rc)
 
-
+#========================================================================================================================
 
 # List objects in MinIO using mc (verification)
 @app.command()
@@ -218,11 +284,15 @@ def ls(prefix: str = typer.Argument(..., help="MinIO prefix, e.g. bronze/acp/sam
     ])
     raise typer.Exit(code=rc)
 
+
+#========================================================================================================================
+
 # List Kafka topics (Redpanda)
 @app.command()
 def topics() -> None:
     raise typer.Exit(code=_rpk(["topic", "list"]))
 
+#========================================================================================================================
 # Redpanda test: Produce N simple messages to a topic
 @app.command()
 def produce(
@@ -234,6 +304,7 @@ def produce(
     rc = _run(["docker", "exec", "-i", "acp-redpanda", "bash", "-lc", script])
     raise typer.Exit(code=rc)
 
+#========================================================================================================================
 # Redpanda test: Consume N messages from a topic
 @app.command()
 def consume(
@@ -241,3 +312,70 @@ def consume(
     n: int = typer.Option(10, help="Number of messages"),
 ) -> None:
     raise typer.Exit(code=_rpk(["topic", "consume", topic, "--brokers", "redpanda:9092", "-n", str(n)]))
+
+#========================================================================================================================
+# Run SQL query in Trino (docker execution)
+@app.command("sql")
+def sql(
+    query: str = typer.Argument(..., help="SQL query to execute in Trino"),
+) -> None:
+    trino_exec(query)
+#========================================================================================================================
+
+
+
+
+#========================================================================================================================
+# Bronze Commands
+#========================================================================================================================
+# Register Parquet location as external table in Trino (raw.bronze)
+@bronze_app.command("register")
+def bronze_register(
+    table: str = typer.Argument(..., help="Table name to register in raw.bronze"),
+    dt: str = typer.Argument(..., help="Partition date, e.g. 2026-03-02"),
+    drop_first: bool = typer.Option(True, "--drop/--no-drop", help="Drop table first to re-register cleanly"),
+) -> None:
+    trino_exec(_bronze_schema_sql())
+
+    if drop_first:
+        trino_exec(f"DROP TABLE IF EXISTS raw.bronze.{table}")
+
+    trino_exec(_bronze_create_table_sql(table, dt))
+    typer.echo(f"Registered raw.bronze.{table} for dt={dt}")
+
+#========================================================================================================================
+# List tables in raw.bronze
+@bronze_app.command("tables")
+def bronze_tables() -> None:
+    trino_exec("SHOW TABLES FROM raw.bronze")
+
+#========================================================================================================================
+# Row count check
+@bronze_app.command("count")
+def bronze_count(
+    table: str = typer.Argument(..., help="Table name in raw.bronze"),
+) -> None:
+    trino_exec(f"SELECT count(*) AS n FROM raw.bronze.{table}")
+
+#========================================================================================================================
+# Sample rows in raw.bronze
+@bronze_app.command("sample")
+def bronze_sample(
+    table: str = typer.Argument(..., help="Table name in raw.bronze"),
+    limit: int = typer.Option(5, "--limit", "-n", help="Number of rows to show"),
+) -> None:
+    trino_exec(f"SELECT * FROM raw.bronze.{table} LIMIT {limit}")
+
+#========================================================================================================================
+# Describe columns and type in raw.bronze table
+@bronze_app.command("describe")
+def bronze_describe(
+    table: str = typer.Argument(..., help="Table name in raw.bronze"),
+) -> None:
+    trino_exec(f"DESCRIBE raw.bronze.{table}")
+
+#========================================================================================================================
+
+
+if __name__ == "__main__":
+    app()
