@@ -40,14 +40,11 @@ jdbc:postgresql://metastore-db:5432/metastore
 
 ---
 
-## Why these are committed
+## Download auxiliary jars dependencies
 
-They are version-pinned and mounted into the Hive container via Docker:
+Run download script:
 
-/opt/hive/auxlib/
-
-Committing them ensures:
-
-• reproducible builds
-• no runtime downloads
-• deterministic dependency versions
+```bash
+./scripts/setup_hive_libs.sh
+docker compose up -d
+```
