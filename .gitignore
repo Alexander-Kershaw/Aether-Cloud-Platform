@@ -18,3 +18,6 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
+
+# Hive auxiliary jars
+config/hive/lib/*.jar
