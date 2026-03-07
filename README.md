@@ -172,9 +172,9 @@ ACP is controlled via a **clean command line interface.**
 Example:
 
 ```bash
-aether platform up
-aether platform status
-aether platform down
+aether up
+aether status
+aether down
 ```
 
 This is reminicient of real industry tools such as:
@@ -190,7 +190,7 @@ This is reminicient of real industry tools such as:
 #### Clone Repository
 
 ```bash
-git clone https://github.com/yourname/aether-cloud-platform.git
+git clone https://github.com/Alexander-Kershaw/aether-cloud-platform.git
 
 cd aether-cloud-platform
 ```
