@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import os
+import re
 import socket
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
+
 import typer
 from rich.console import Console
 from rich.table import Table
-import re
-import shlex
-from dataclasses import dataclass
 
 
 app = typer.Typer(add_completion=False, help="AETHER Cloud Platform (ACP) CLI")
+bronze_app = typer.Typer(help="Bronze layer utilities (raw external tables)")
+redpanda_app = typer.Typer(help="Redpanda utilities")
+
+app.add_typer(bronze_app, name="bronze")
+app.add_typer(redpanda_app, name="redpanda")
+
 console = Console()
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -22,24 +28,49 @@ ENV_FILE = REPO_ROOT / ".env"
 _VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
-#========================================================================================================================    
-# ACP compose command / env loading / docker execution
-#========================================================================================================================
+# ======================================================================================================================
+# Core helpers
+# ======================================================================================================================
 
+def _run(
+    cmd: list[str],
+    *,
+    check: bool = False,
+    capture_output: bool = False,
+    text: bool = True,
+) -> subprocess.CompletedProcess:
+    """
+    Runs a subprocess command rooted at the repo directory.
+    """
+    try:
+        return subprocess.run(
+            cmd,
+            cwd=str(REPO_ROOT),
+            check=check,
+            capture_output=capture_output,
+            text=text,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise typer.Exit(code=exc.returncode)
 
-def _run(cmd: list[str]) -> int:
-    proc = subprocess.run(cmd, cwd=str(REPO_ROOT))
-    return proc.returncode
 
 def _compose_cmd(extra: list[str]) -> list[str]:
     return [
-        "docker", "compose",
-        "-f", str(COMPOSE_FILE),
-        "--env-file", str(ENV_FILE),
+        "docker",
+        "compose",
+        "-f",
+        str(COMPOSE_FILE),
+        "--env-file",
+        str(ENV_FILE),
         *extra,
     ]
 
-# Check port
+
+def _docker_exec(container: str, args: list[str], *, interactive: bool = False) -> subprocess.CompletedProcess:
+    exec_flag = "-it" if interactive else "-i"
+    return _run(["docker", "exec", exec_flag, container, *args])
+
+
 def _port_open(host: str, port: int, timeout_s: float = 0.5) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout_s):
@@ -47,7 +78,7 @@ def _port_open(host: str, port: int, timeout_s: float = 0.5) -> bool:
     except OSError:
         return False
 
-# .env parser  
+
 def _load_env_file(path: Path) -> dict[str, str]:
     raw: dict[str, str] = {}
     if not path.exists():
@@ -61,9 +92,10 @@ def _load_env_file(path: Path) -> dict[str, str]:
         raw[k.strip()] = v.strip()
 
     def expand(val: str) -> str:
-        def repl(m: re.Match[str]) -> str:
-            name = m.group(1)
+        def repl(match: re.Match[str]) -> str:
+            name = match.group(1)
             return raw.get(name) or os.environ.get(name, "")
+
         prev = None
         cur = val
         for _ in range(5):
@@ -76,51 +108,37 @@ def _load_env_file(path: Path) -> dict[str, str]:
     return {k: expand(v) for k, v in raw.items()}
 
 
-# Docker execution
-def _docker_exec(container: str, args: list[str]) -> int:
-    return _run(["docker", "exec", "-it", container, *args])
-
-#========================================================================================================================
-# Redpanda 
-#========================================================================================================================
-# Redpanda helper
-def _rpk(args: list[str]) -> int:
-    return _run(["docker", "exec", "-it", "acp-redpanda", "rpk", *args])
-
-
-#========================================================================================================================
-# Trino runner
-#========================================================================================================================
+# ======================================================================================================================
+# Trino helpers
+# ======================================================================================================================
 
 @dataclass(frozen=True)
 class TrinoTarget:
     container: str = "acp-trino"
     cli_bin: str = "trino"
 
-# Run subprocess, raise typer error on failure
-def _run_sub(cmd: list[str]) -> subprocess.CompletedProcess:
-    try:
-        return subprocess.run(cmd, check=True, text=True)
-    except subprocess.CalledProcessError as e:
-        raise typer.Exit(code=e.returncode)
 
-# Trino helper (execute SQL inside Trino container)
 def trino_exec(query: str, *, target: TrinoTarget = TrinoTarget()) -> None:
-    cmd = [
-        "docker", "exec", "-i",
-        target.container,
-        target.cli_bin,
-        "--execute", query,
-    ]
-    _run_sub(cmd)
+    """
+    Executes SQL inside the Trino container.
+    """
+    _run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            target.container,
+            target.cli_bin,
+            "--execute",
+            query,
+        ],
+        check=True,
+    )
 
-#========================================================================================================================
-# Bronze Utilities
-#========================================================================================================================
 
-bronze_app = typer.Typer(help="Bronze layer utilities (raw external tables)")
-app.add_typer(bronze_app, name="bronze")
-
+# ======================================================================================================================
+# Bronze SQL helpers
+# ======================================================================================================================
 
 def _bronze_schema_sql() -> str:
     return """
@@ -142,125 +160,156 @@ WITH (
 """.strip()
 
 
+# ======================================================================================================================
+# Stack lifecycle commands
+# ======================================================================================================================
 
-#========================================================================================================================
-# COMMAND DEFINITIONS
-#========================================================================================================================
-
-# Start ACP stack
 @app.command()
 def up() -> None:
+    """
+    Starts the ACP stack with docker compose.
+    """
     if not COMPOSE_FILE.exists():
+        console.print(f"[red]Missing compose file:[/red] {COMPOSE_FILE}")
         raise typer.Exit(code=2)
+
     if not ENV_FILE.exists():
-        console.print("[red]Missing .env[/red]. \n [yellow]Solution : create it via: cp .env.example .env[/yellow]")
+        console.print("[red]Missing .env[/red]\n[yellow]Solution: cp .env.example .env[/yellow]")
         raise typer.Exit(code=2)
 
     console.print("AETHER Cloud Platform starting...\n")
-    rc = _run(_compose_cmd(["up", "-d"]))
-    if rc != 0:
+    proc = _run(_compose_cmd(["up", "-d"]))
+    if proc.returncode != 0:
         console.print("[red]docker compose up failed[/red]")
-        raise typer.Exit(code=rc)
+        raise typer.Exit(code=proc.returncode)
 
     console.print("\n[green]ACP containers started.[/green]")
     status()
 
-#========================================================================================================================
-# Stop ACP
+
 @app.command()
 def down() -> None:
+    """
+    Stops the ACP stack.
+    """
     if not ENV_FILE.exists():
         console.print("[yellow]No .env found, running down anyway.[/yellow]")
-    rc = _run(_compose_cmd(["down"]))
-    raise typer.Exit(code=rc)
 
-#========================================================================================================================
+    proc = _run(_compose_cmd(["down"]))
+    raise typer.Exit(code=proc.returncode)
 
-# Clean ACP restart
+
 @app.command()
 def restart() -> None:
+    """
+    Restarts the ACP stack.
+    """
     down()
     up()
 
-#========================================================================================================================
-# Show ACP container status
+
 @app.command()
 def status() -> None:
-    table = Table(title="ACP Status", show_lines=False)
-    table.add_column("Check", style="bold")
+    """
+    Shows ACP status and docker compose ps output.
+    """
+    table = Table(title="ACP Status")
+    table.add_column("Check")
     table.add_column("Result")
 
-    table.add_row("compose file", "OK" if COMPOSE_FILE.exists() else "missing")
-    table.add_row("env file", "OK" if ENV_FILE.exists() else "missing")
-    console.print(table)
+    table.add_row("compose file", "OK" if COMPOSE_FILE.exists() else "MISSING")
+    table.add_row("env file", "OK" if ENV_FILE.exists() else "MISSING")
 
-    console.print("\n[bold]docker compose ps[/bold]")
+    console.print(table)
+    console.print()
     _run(_compose_cmd(["ps"]))
 
 
-#========================================================================================================================
-# Run diagnostics (e.g docker install, env present, port avaliabilty)
 @app.command()
 def doctor() -> None:
+    """
+    Runs quick ACP diagnostics.
+    """
+    env = _load_env_file(ENV_FILE)
     table = Table(title="ACP Doctor")
-    table.add_column("Check", style="bold")
+    table.add_column("Check")
     table.add_column("Result")
 
-    docker_ok = subprocess.run(["docker", "--version"], capture_output=True).returncode == 0
-    table.add_row("docker", "OK" if docker_ok else "missing")
+    docker_ok = _run(["docker", "--version"]).returncode == 0
+    table.add_row("docker", "OK" if docker_ok else "MISSING")
+    table.add_row(".env present", "OK" if ENV_FILE.exists() else "MISSING")
 
-    table.add_row(".env present", "OK" if ENV_FILE.exists() else "missing")
+    ports_to_check = [
+        ("MINIO_API_PORT", env.get("MINIO_API_PORT")),
+        ("MINIO_CONSOLE_PORT", env.get("MINIO_CONSOLE_PORT")),
+        ("REDPANDA_KAFKA_HOST_PORT", env.get("REDPANDA_KAFKA_HOST_PORT")),
+        ("REDPANDA_ADMIN_HOST_PORT", env.get("REDPANDA_ADMIN_HOST_PORT")),
+        ("REDPANDA_CONSOLE_HOST_PORT", env.get("REDPANDA_CONSOLE_HOST_PORT")),
+        ("SPARK_MASTER_UI_HOST_PORT", env.get("SPARK_MASTER_UI_HOST_PORT")),
+        ("SPARK_MASTER_RPC_HOST_PORT", env.get("SPARK_MASTER_RPC_HOST_PORT")),
+        ("SPARK_WORKER_UI_HOST_PORT", env.get("SPARK_WORKER_UI_HOST_PORT")),
+        ("TRINO_HOST_PORT", env.get("TRINO_HOST_PORT")),
+        ("POSTGRES_HOST_PORT", env.get("POSTGRES_HOST_PORT")),
+        ("HIVE_METASTORE_HOST_PORT", env.get("HIVE_METASTORE_HOST_PORT")),
+        ("PROMETHEUS_HOST_PORT", env.get("PROMETHEUS_HOST_PORT")),
+        ("GRAFANA_HOST_PORT", env.get("GRAFANA_HOST_PORT")),
+    ]
 
-    host = "127.0.0.1"
-    ports = [9000, 9001, 19092, 18080, 18081, 18089, 19090, 13000]
-    busy = [str(p) for p in ports if _port_open(host, p)]
-    table.add_row("ports already in use", ", ".join(busy) if busy else "none detected")
+    busy_ports: list[str] = []
+    for name, value in ports_to_check:
+        if not value:
+            continue
+        try:
+            port = int(value)
+        except ValueError:
+            busy_ports.append(f"{name}={value} (invalid)")
+            continue
+        if _port_open("127.0.0.1", port):
+            busy_ports.append(f"{name}={port}")
 
+    table.add_row("ports already in use", ", ".join(busy_ports) if busy_ports else "none detected")
     console.print(table)
 
-#========================================================================================================================
-# Run spark job on ACP spark cluster (MinIO and S3A wired in)
-@app.command()
-def spark_run(script_path: str = typer.Argument(..., help="Path under repo root, e.g. scripts/spark_write_parquet.py")) -> None:
-    env = _load_env_file(ENV_FILE)
 
-    access_key = env.get("AWS_ACCESS_KEY_ID") or os.environ.get("AWS_ACCESS_KEY_ID")
-    secret_key = env.get("AWS_SECRET_ACCESS_KEY") or os.environ.get("AWS_SECRET_ACCESS_KEY")
-    bucket = env.get("S3_BUCKET") or os.environ.get("S3_BUCKET") or "aether-lakehouse"
+# ======================================================================================================================
+# Spark and storage commands
+# ======================================================================================================================
 
-    if not access_key or not secret_key:
-        console.print("[red]Missing AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY[/red] in .env or shell.")
-        raise typer.Exit(code=2)
-
-    # Docker network endpoint
-    s3_endpoint = "http://minio:9000"
-
-    container_script = f"/opt/aether/{script_path.lstrip('/')}"
-    packages = "org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262"
+@app.command("spark-run")
+def spark_run(
+    script_path: str = typer.Argument(..., help="Path to Spark script relative to repo root, e.g. scripts/foo.py"),
+) -> None:
+    """
+    Submits a Spark job through the Spark master container.
+    """
+    console.print(f"[bold]Running Spark job:[/bold] {script_path}")
 
     cmd = [
         "/opt/spark/bin/spark-submit",
-        "--master", "spark://spark-master:7077",
-        "--packages", packages,
-        "--conf", f"spark.hadoop.fs.s3a.endpoint={s3_endpoint}",
-        "--conf", "spark.hadoop.fs.s3a.path.style.access=true",
-        "--conf", "spark.hadoop.fs.s3a.connection.ssl.enabled=false",
-        "--conf", f"spark.hadoop.fs.s3a.access.key={access_key}",
-        "--conf", f"spark.hadoop.fs.s3a.secret.key={secret_key}",
-        "--conf", "spark.hadoop.fs.s3a.aws.credentials.provider=org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider",
-        "--conf", f"spark.acp.s3.bucket={bucket}", 
-        container_script,
+        "--master",
+        "spark://spark-master:7077",
+        "--packages",
+        ",".join(
+            [
+                "org.apache.hadoop:hadoop-aws:3.3.4",
+                "com.amazonaws:aws-java-sdk-bundle:1.12.262",
+                "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.8.1",
+            ]
+        ),
+        f"/opt/aether/{script_path}",
     ]
 
-    console.print(f"[bold]Running Spark job:[/bold] {script_path}")
-    rc = _docker_exec("acp-spark-master", cmd)
-    raise typer.Exit(code=rc)
+    proc = _docker_exec("acp-spark-master", cmd)
+    raise typer.Exit(code=proc.returncode)
 
-#========================================================================================================================
 
-# List objects in MinIO using mc (verification)
-@app.command()
-def ls(prefix: str = typer.Argument(..., help="MinIO prefix, e.g. bronze/acp/sample_events")) -> None:
+@app.command("ls")
+def ls_objects(
+    prefix: str = typer.Argument(..., help="MinIO prefix, e.g. bronze/acp/sample_events"),
+) -> None:
+    """
+    Lists objects in MinIO using the mc client.
+    """
     env = _load_env_file(ENV_FILE)
     user = env.get("MINIO_ROOT_USER")
     pw = env.get("MINIO_ROOT_PASSWORD")
@@ -275,66 +324,92 @@ def ls(prefix: str = typer.Argument(..., help="MinIO prefix, e.g. bronze/acp/sam
         f"&& mc ls -r aether/{bucket}/{prefix.lstrip('/')}"
     )
 
-    rc = _run([
-        "docker", "run", "--rm",
-        "--network", "acp-net",
-        "--entrypoint", "/bin/sh",
-        "minio/mc:RELEASE.2025-01-17T23-25-50Z",
-        "-lc", script
-    ])
-    raise typer.Exit(code=rc)
+    proc = _run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "acp-net",
+            "--entrypoint",
+            "/bin/sh",
+            "minio/mc:RELEASE.2025-01-17T23-25-50Z",
+            "-lc",
+            script,
+        ]
+    )
+    raise typer.Exit(code=proc.returncode)
 
 
-#========================================================================================================================
+# ======================================================================================================================
+# Redpanda commands
+# ======================================================================================================================
 
-# List Kafka topics (Redpanda)
-@app.command()
-def topics() -> None:
+def _rpk(args: list[str]) -> int:
+    proc = _run(["docker", "exec", "-i", "acp-redpanda", "rpk", *args])
+    return proc.returncode
+
+
+@redpanda_app.command("topics")
+def redpanda_topics() -> None:
+    """
+    Lists Redpanda topics.
+    """
     raise typer.Exit(code=_rpk(["topic", "list"]))
 
-#========================================================================================================================
-# Redpanda test: Produce N simple messages to a topic
-@app.command()
-def produce(
-    topic: str,
+
+@redpanda_app.command("produce")
+def redpanda_produce(
+    topic: str = typer.Argument(..., help="Topic name"),
     n: int = typer.Option(10, help="Number of messages"),
     prefix: str = typer.Option("event_", help="Message prefix"),
 ) -> None:
+    """
+    Produces N simple messages to a topic.
+    """
     script = f'for i in $(seq 1 {n}); do echo "{prefix}$i"; done | rpk topic produce {topic} --brokers redpanda:9092'
-    rc = _run(["docker", "exec", "-i", "acp-redpanda", "bash", "-lc", script])
-    raise typer.Exit(code=rc)
+    proc = _run(["docker", "exec", "-i", "acp-redpanda", "bash", "-lc", script])
+    raise typer.Exit(code=proc.returncode)
 
-#========================================================================================================================
-# Redpanda test: Consume N messages from a topic
-@app.command()
-def consume(
-    topic: str,
+
+@redpanda_app.command("consume")
+def redpanda_consume(
+    topic: str = typer.Argument(..., help="Topic name"),
     n: int = typer.Option(10, help="Number of messages"),
 ) -> None:
+    """
+    Consumes N messages from a topic.
+    """
     raise typer.Exit(code=_rpk(["topic", "consume", topic, "--brokers", "redpanda:9092", "-n", str(n)]))
 
-#========================================================================================================================
-# Run SQL query in Trino (docker execution)
+
+# ======================================================================================================================
+# SQL command
+# ======================================================================================================================
+
 @app.command("sql")
 def sql(
     query: str = typer.Argument(..., help="SQL query to execute in Trino"),
 ) -> None:
+    """
+    Executes a SQL query in Trino.
+    """
     trino_exec(query)
-#========================================================================================================================
 
 
+# ======================================================================================================================
+# Bronze commands
+# ======================================================================================================================
 
-
-#========================================================================================================================
-# Bronze Commands
-#========================================================================================================================
-# Register Parquet location as external table in Trino (raw.bronze)
 @bronze_app.command("register")
 def bronze_register(
     table: str = typer.Argument(..., help="Table name to register in raw.bronze"),
     dt: str = typer.Argument(..., help="Partition date, e.g. 2026-03-02"),
     drop_first: bool = typer.Option(True, "--drop/--no-drop", help="Drop table first to re-register cleanly"),
 ) -> None:
+    """
+    Registers a Bronze Parquet partition as an external table in Trino.
+    """
     trino_exec(_bronze_schema_sql())
 
     if drop_first:
@@ -343,38 +418,44 @@ def bronze_register(
     trino_exec(_bronze_create_table_sql(table, dt))
     typer.echo(f"Registered raw.bronze.{table} for dt={dt}")
 
-#========================================================================================================================
-# List tables in raw.bronze
+
 @bronze_app.command("tables")
 def bronze_tables() -> None:
+    """
+    Lists tables in raw.bronze.
+    """
     trino_exec("SHOW TABLES FROM raw.bronze")
 
-#========================================================================================================================
-# Row count check
+
 @bronze_app.command("count")
 def bronze_count(
     table: str = typer.Argument(..., help="Table name in raw.bronze"),
 ) -> None:
+    """
+    Shows row count for a Bronze table.
+    """
     trino_exec(f"SELECT count(*) AS n FROM raw.bronze.{table}")
 
-#========================================================================================================================
-# Sample rows in raw.bronze
+
 @bronze_app.command("sample")
 def bronze_sample(
     table: str = typer.Argument(..., help="Table name in raw.bronze"),
     limit: int = typer.Option(5, "--limit", "-n", help="Number of rows to show"),
 ) -> None:
+    """
+    Shows sample rows from a Bronze table.
+    """
     trino_exec(f"SELECT * FROM raw.bronze.{table} LIMIT {limit}")
 
-#========================================================================================================================
-# Describe columns and type in raw.bronze table
+
 @bronze_app.command("describe")
 def bronze_describe(
     table: str = typer.Argument(..., help="Table name in raw.bronze"),
 ) -> None:
+    """
+    Describes columns and types for a Bronze table.
+    """
     trino_exec(f"DESCRIBE raw.bronze.{table}")
-
-#========================================================================================================================
 
 
 if __name__ == "__main__":
