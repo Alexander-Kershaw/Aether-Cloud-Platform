@@ -143,6 +143,7 @@ services:
     volumes:
       - ../config/spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
       - ../scripts:/opt/aether/scripts:ro
+      - ../data:/opt/aether/data:ro
       - ../data/spark/ivy2:/home/spark/.ivy2
     networks: [acp-net]
 
@@ -166,6 +167,7 @@ services:
       - "${SPARK_WORKER_UI_HOST_PORT}:8081"
     volumes:
       - ../config/spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - ../data:/opt/aether/data:ro
     networks: [acp-net]
     
 
