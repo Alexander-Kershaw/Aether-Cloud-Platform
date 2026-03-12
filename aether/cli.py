@@ -15,15 +15,18 @@ from rich.table import Table
 app = typer.Typer(add_completion=False, help="AETHER Cloud Platform (ACP) CLI")
 bronze_app = typer.Typer(help="Bronze layer utilities (raw external tables)")
 redpanda_app = typer.Typer(help="Redpanda utilities")
+silver_app = typer.Typer(help="Silver layer operations")
 
 app.add_typer(bronze_app, name="bronze")
 app.add_typer(redpanda_app, name="redpanda")
+app.add_typer(silver_app, name="silver")
 
 console = Console()
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COMPOSE_FILE = REPO_ROOT / "docker" / "compose.yml"
 ENV_FILE = REPO_ROOT / ".env"
+
 
 _VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -458,5 +461,103 @@ def bronze_describe(
     trino_exec(f"DESCRIBE raw.bronze.{table}")
 
 
+# ======================================================================================================================
+# Silver commands
+# ======================================================================================================================
+
+@silver_app.command("register")
+def silver_register(table: str):
+    """
+    Register a Silver table in Trino and sync partitions.
+    """
+    create_sql = f"""
+    CREATE TABLE IF NOT EXISTS raw.silver.{table} (
+        event_id bigint,
+        ingest_ts timestamp,
+        event_date date
+    )
+    WITH (
+        external_location='s3a://aether-lakehouse/silver/acp/{table}/',
+        format='PARQUET',
+        partitioned_by = ARRAY['event_date']
+    )
+    """
+    trino_exec(create_sql)
+
+    typer.echo("Silver table registered")
+
+    sync_sql = f"""
+    CALL raw.system.sync_partition_metadata(
+        'silver',
+        '{table}',
+        'FULL'
+    )
+    """
+    trino_exec(sync_sql)
+
+    typer.echo("Partitions synchronized")
+
+
+@silver_app.command("sync")
+def silver_sync(table: str):
+    """
+    Synchronize Hive partitions for a Silver table.
+    """
+    sql = f"""
+    CALL raw.system.sync_partition_metadata(
+        'silver',
+        '{table}',
+        'FULL'
+    )
+    """
+    trino_exec(sql)
+
+    typer.echo("Partitions synchronized")
+
+
+@silver_app.command("sync")
+def silver_sync(table: str):
+    """
+    Synchronize Hive partitions for a Silver table.
+    """
+    sql = f"""
+    CALL raw.system.sync_partition_metadata(
+        'silver',
+        '{table}',
+        'FULL'
+    )
+    """
+    trino_exec(sql)
+
+    typer.echo("Partitions synchronized")
+
+
+@silver_app.command("count")
+def silver_count(table: str):
+    sql = f"""
+    SELECT count(*) FROM raw.silver.{table}
+    """
+    trino_exec(sql)
+
+
+@silver_app.command("sample")
+def silver_sample(table: str):
+    sql = f"""
+    SELECT * FROM raw.silver.{table} LIMIT 10
+    """
+    trino_exec(sql)
+
+
+# ======================================================================================================================
+# 
+# ======================================================================================================================
+
+
+
+
+
 if __name__ == "__main__":
     app()
+
+
+
