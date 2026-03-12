@@ -1170,6 +1170,337 @@ ACP now a functioning end-to-end analytics platforms rather than a data storage 
 
 ## ACP Stress Test (ODIN flight dataset)
 
+### Objective
+
+From up to this stage in development, the Aether Cloud Platform pipeline has only been validated using a small synthetic dataset. This has served to be sufficient for the confirmation of the correctness of the bronze, silver, and cold architecture and transformations, but it did not demonstrate that ACP could handle realistic datasets with realistic characteristics such as:
+
+- large row numbers
+- missing values
+- inconsistent delay metrics
+- categorical aviation dimensions (carriers, routes)
+- realistic distributions of operation data
+
+To authentically validate ACP's robustness, I used a real aviation dataset as a more thorough test case (since a future project planned is ODIN, a avition based project)
+
+The dataset was sourced from a flight operation dataset (BTS-style scheme) and stored locally as `odin_test_dataset.csv`.
+
+This dataset contained 539,747 flight records with the following fields:
+
+```txt
+OP_UNIQUE_CARRIER
+ORIGIN
+DEST
+DEP_DELAY_NEW
+ARR_DELAY_NEW
+CANCELLED
+DISTANCE
+```
+
+The objective of this part of the ACP development was the truely confirm that ACP can successfully:
+
+- Ingest a real dataset into the Bronze layer
+- Clean and structure data in the Silver layer
+- Produce aggregated analytics in the Gold layer
+- Maintain data consistency across all these layers
+
+---
+
+### Bronze Layer: Raw Flight Data Ingestion
+
+#### Ingestion Approach
+
+The law CSV dataset was placed in a staging location at `data/staging/odin/flights`, and this data path was added to the docker compose volumes for the spark master and worker.
+
+Then the raw CSV was ingested using a Spark job:
+
+```bash
+aether spark-run scripts/ingest_odin_bronze.py
+```
+
+This job performed the following operations:
+
+- Read the CSV file with header detection and schema inference
+- Normalized column names to snake_case
+- Appended ingestion metadata columns
+- Wrote the dataset to the ACP Bronze lakehouse
+
+So, the ODIN bronze dataset was written to:
+
+```txt
+s3a://aether-lakehouse/bronze/odin/flights/
+```
+
+Additional provenance columns were also added: 
+
+| Column        | Purpose                       |
+| ------------- | ----------------------------- |
+| `source_file` | identifies the dataset source |
+| `ingest_ts`   | timestamp of ingestion        |
+
+
+This serves to ensure bronze records have data lineage and remain traceable to the ingestion source.
+
+#### Bronze Schema
+
+```sql
+op_unique_carrier
+origin
+dest
+dep_delay_new
+arr_delay_new
+cancelled
+distance
+source_file
+ingest_ts
+```
+
+#### Bronze Validation Queries
+
+```sql
+SELECT count(*) FROM raw.bronze.odin_flights
+```
+
+Result: `539747`
+
+**Sample records:**
+
+```txt
+WN,PHX,BWI,82.0,57.0,0.0,1999.0
+DL,ATL,LIT,9.0,1.0,0.0,453.0
+AA,ABQ,DFW,NULL,NULL,1.0,569.0
+```
+
+**Observations:**
+
+- missing delay values correctly appeared as `NULL`
+- cancellation flag is preserves
+- numeric values were inferred correctly
+
+This authenticates that the bronze ingestion layer can process large real datasets without schema corruption.
+
+---
+
+### Silver Layer: Structure Flight Data
+
+#### Transformation Objectives
+
+The silver layer transforms the bronze data into cleaner and more prepared data suitable for analytics while simultaneously preserving the raw data characteristics of the bronze layer.
+
+**Improvements applied:**
+
+- column normalization
+- explicit typing
+- semantic naming
+
+#### Silver Transformation Script
+
+```bash
+aether spark-run scripts/bronze_to_silver_odin.py
+```
+
+#### Transformations Applied
+
+| Bronze Column     | Silver Column     |
+| ----------------- | ----------------- |
+| op_unique_carrier | carrier           |
+| dep_delay_new     | dep_delay_minutes |
+| arr_delay_new     | arr_delay_minutes |
+| cancelled         | cancelled_flag    |
+| distance          | distance_miles    |
+
+
+This transformation preserved the null values and did not involve any artificial imputation.
+
+**Silver Storage Location:**
+
+```txt
+s3a://aether-lakehouse/silver/odin/flights/
+```
+
+#### Silver Validation
+
+**Row count verification:**
+
+```sql
+SELECT count(*) FROM raw.silver.odin_flights
+```
+
+Result: `539747`
+
+This confirms that no records were lost during the transformation.
+
+**Schema verification:**
+
+```sql
+DESCRIBE raw.silver.odin_flights
+```
+
+Result:
+
+```bash
+carrier varchar
+origin varchar
+dest varchar
+dep_delay_minutes double
+arr_delay_minutes double
+cancelled_flag double
+distance_miles double
+source_file varchar
+ingest_ts timestamp
+```
+
+So, the silver dataset is structure for analytics while maintaining the bronze lineage.
+
+---
+
+### Gold Layer: Carrier Analytics
+
+#### Purpose
+
+Produce the first really meaningful analytics table in ACP using real flight data.
+
+Because the dataset does not contain a flight data column providing any temporal context, time-series aggregations were not possible. So, instead I attempted a carrier-level operation summary.
+
+#### Gold Transformation Script
+
+```bash
+aether spark-run script/silver_to_gold_odin.py
+```
+
+#### Aggregations
+
+| Metric                | Description             |
+| --------------------- | ----------------------- |
+| flight_count          | total flights           |
+| avg_dep_delay_minutes | average departure delay |
+| avg_arr_delay_minutes | average arrival delay   |
+| cancelled_count       | total cancellations     |
+| avg_distance_miles    | average flight distance |
+
+
+#### Gold Storage
+
+```txt
+s3a://aether-lakehouse/gold/odin/carrier_delay_summary/
+```
+
+#### Gold Validation
+
+**Carrier count:**
+
+```sql
+SELECT count(*) FROM raw.gold.carrier_delay_summary
+```
+
+Result: `14` the number of distinct carriers
+
+**Top carriers by flight volume:**
+
+```sql
+SELECT * 
+FROM raw.gold.carrier_delay_summary
+ORDER BY flight_count DESC
+LIMIT 10
+```
+
+Output:
+
+```txt
+WN 105307 flights
+DL 76306 flights
+AA 75088 flights
+OO 65036 flights
+UA 62007 flights
+```
+
+#### Cross-layer Integrity Check
+
+To certify that the aggregations are correct:
+
+```sql
+SELECT sum(flight_count)
+FROM raw.gold.carrier_delay_summary
+```
+
+Result: `539747`
+
+This exactly matches the Bronze and Silver layer row counts. Thus, authenticating that the Gold aggregation pipeline also preserved all the records.
+
+#### Note on Spark Builds
+
+All the ACP architecture layers for the ODIN test data were built with a specific spark build configuration, only with variations to app_name for clarity when viewing the Spark job logs.
+
+The general Spark build form is as follows:
+
+```python
+def build_spark(app_name: str) -> SparkSession: 
+  return ( 
+    SparkSession.builder .appName(app_name) 
+    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") 
+    .config("spark.hadoop.fs.s3a.endpoint", os.environ["S3_ENDPOINT"]) 
+    .config("spark.hadoop.fs.s3a.access.key", os.environ["AWS_ACCESS_KEY_ID"]) 
+    .config("spark.hadoop.fs.s3a.secret.key", os.environ["AWS_SECRET_ACCESS_KEY"]) 
+    .config("spark.hadoop.fs.s3a.path.style.access", "true") 
+    .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") 
+    .getOrCreate() )
+```
+
+This was implemented since the existing Spark configuration defined Iceberg catalog storage settings. These iceberg settings only apply when interacting with Iceberg tables via the `lake` catalog
+
+However, the bronze ingestion job writes plain parquet files directly to an `s3a://` path, which uses Hadoop S3A filesystem layer, NOT the Iceberg catalog.
+
+This resulted with a 403 forbidden error that was rectified using the spark build format used above. The Spark session builder configured the S3A access using environment variables already injected into the Spark containers.
+
+---
+
+### Engineering Observations
+
+#### Null Handling
+
+Real avidation datasets tend to contain missing values such as a missing delay. ACP preserved these nulls without introducing any bias.
+
+#### Schema Robustness
+
+Spark inference and Trino querying behaved consistently across the Bronze and Silver layers.
+
+#### Lakehouse Integration
+
+The pipeline successfully demonstrated interoperability between:
+
+- Spark
+- MinIO object storage
+- Trino query engine
+
+#### Data Scale
+
+Processing approximately 540K rows confirmed that ACP can handle cases of non-trivial dataset volumnes.
+
+---
+
+### Outcomes
+
+I have validated ACP against a realistic aviation dataset.
+
+ACP successfully executed a full data lifecycle, transforming raw data in bronze to silver, and gold, resulting in actual real analytics all with the following properties:
+
+- consistent row counts across layers
+- clean schema transformations
+- reliable object storage integration
+- accurate analytical outputs
+
+
+
+---
+
+
+**STATUS: COMPLETE**
+
+**ACP is now validated as a functional local lakehouse platform that is capable of handling realistic data pipelines**
+
+---
+
+
+
 
 
 
