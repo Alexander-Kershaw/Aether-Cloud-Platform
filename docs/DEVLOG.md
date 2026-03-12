@@ -1008,4 +1008,168 @@ ACP now supports a real data engineering workflow
 
 ---
 
+## Silver to Gold Analytics Layer (2026-03-12)
+
+### Objective
+
+I wanted to implement a Gold analytics layer within Aether Cloud Platform's lakehouse architecture.
+
+The silver layer introduced structured datasets derived from the Bronze data, the Gold layer represents curated analytics outputs designed for direct consumption.
+
+Gold datasets will typically contain:
+
+- aggregated metrics
+- dimensional summaries
+- business-oriented views of the data
+
+This part of the development serves to demonstrate the ACP can transform operational datsets into analytics-prepared outputs.
+
+The gold datasets represents the final stage of data modelling before consumption by dashboards, reports and machine learning workflows. With the competion of the gold layer, ACP has a full data engineering workflow capability.
+
+---
+
+### Gold Dataset Design
+
+For the initial Gold dataset, a simple analytical table was implemented:
+
+```bash
+daily_event_counts
+```
+
+With the following schema:
+
+```sql
+event_date DATE
+event_count BIGINT
+load_ts TIMESTAMP
+```
+
+This is a basic baseline gold table designed to answer the question: How many events occured per day?
+
+This is a very simple table, but it demonstrates the full analytical workflow of ACP.
+
+---
+
+### Spark Aggregation Pipeline
+
+I implemented a Spark job the aggregate the Silver dataset into the Gold dataset: `scripts/silver_to_gold.py`
+
+**Input:**
+
+Silver dataset stored in MinIO: `s3a://aether-lakehouse/silver/acp/sample_events/`
+
+**Transformation:**
+
+The Spark job performs a grouped aggregation:
+
+```sql
+GROUP BY event_date
+COUNT(*)
+```
+
+A processing timestamp (`load_ts`) was added to record when the Gold dataset was generated.
+
+**Output:**
+
+The Gold dataset was written to: `s3a://aether-lakehouse/gold/acp/daily_event_counts/`
+
+The resulting dataset contains one row per event date.
+
+---
+
+### Gold Registration in Trino
+
+To enable SQL queries, the Gold dataset was registered as an external table in Trino.
+
+Schema creation: 
+
+```sql
+CREATE SCHEMA IF NOT EXISTS raw.gold
+WITH (location='s3a://aether-lakehouse/gold/');
+```
+
+Table definiation:
+```sql
+CREATE TABLE raw.gold.daily_event_counts (
+  event_date date,
+  event_count bigint,
+  load_ts timestamp
+)
+WITH (
+  external_location='s3a://aether-lakehouse/gold/acp/daily_event_counts/',
+  format='PARQUET'
+);
+```
+
+Since this gold dataset is not partitioned, no metadata synchronisation step was warranted.
+
+---
+
+### Validation
+
+I used some verification queries to confirm the integrity of the ACP pipeline:
+
+**Silver row count:**
+
+```sql
+SELECT count(*) FROM raw.silver.sample_events
+```
+
+Result: `100` 
+
+**Gold aggregation check:**
+
+```sql
+SELECT sum(event_count) FROM raw.gold.daily_event_counts
+```
+
+Result: `100` 
+
+
+This verifies that the aggregation preserved all the records from the silver dataset
+
+---
+
+### Outcome
+
+ACP now supports a complete analytical workflow:
+
+```txt
+Spark ingestion
+      ↓
+Bronze dataset storage
+      ↓
+Spark transformation
+      ↓
+Silver structured dataset
+      ↓
+Spark aggregation
+      ↓
+Gold analytical dataset
+      ↓
+SQL analytics via Trino
+```
+
+---
+
+
+**STATUS: COMPLETE**
+
+ACP now supports:
+
+- Silver to Gold layer aggregations
+
+- Analytics ready Gold layer data
+
+
+**Most importantly:**
+
+ACP now a functioning end-to-end analytics platforms rather than a data storage system
+
+---
+
+## ACP Stress Test (ODIN flight dataset)
+
+
+
 
