@@ -728,3 +728,284 @@ ACP is no longer purely infrastructure.
 It is now queryable.
 
 ---
+
+
+## Bronze to Silver Transformation Pipeline (2026-03-12)
+
+### Objective
+I wanted to implement a silver layer transformation pipeline within the Aether Cloud Platform lakehouse architecture.
+
+Previously, I validated that raw bronze datasets stored in object storage can be queried via Trino. So naturally, I wanted to expand upon this by introducing data transformation and layered data modelling.
+
+The silver layer represents cleaned and structured datasets derived from the raw Bronze layer data.
+
+This development serves to demonstrate the ACP can support an authentic data engineering workflow such as the following: 
+
+```txt
+Bronze (raw data)
+        ↓
+Spark transformations
+        ↓
+Silver (structured datasets)
+        ↓
+SQL analytics via Trino
+```
+
+---
+
+
+### Architecture Context
+
+Aether Cloud Platform follows the canonical lakehouse structure: bronze, silver, and gold layers.
+
+**Each layer serves a specific role:**
+
+#### Bronze
+
+The bronze layer is the raw ingestion layer.
+
+**The bronze layer is characterised by the following:**
+
+- Minimally transformed (raw data is preserved, nothing changed from ingestion)
+- Schema flexible (No specific schema structure has been designed or enforced)
+- Optimised for ingestion speed
+- Usually not partitioned (unless necessary for very large data or streaming but even then this tends to be a very course partition (day/hour partitions))
+
+#### Silver
+
+The silver layer is the structued transformation layer.
+
+**Silver layer characteristics:**
+
+- Cleaned data 
+- Normalised types
+- Analytics-friendly schema
+- partitioned storage
+- Some engineered data fields (such as metadata fields such as ingestion timestamps for liniage purposes)
+
+---
+
+### Implementation Overview
+
+The silver transformation pipeline consists of three components:
+
+- Spark transformation job
+- Silver data storage in MinIO
+- Trino table registration and partition discovery 
+
+---
+
+### Spark Transformation
+
+A Spark job was implemented to convert Bronze records into Silver format.
+
+Spark job file: `scripts/bronze_to_silver.py`
+
+
+**This job performs three operations:**
+
+#### Read Bronze Data
+
+The bronze Parquet files are read from MinIO: `s3a://aether-lakehouse/bronze/acp/sample_events/`
+
+#### Transform Schema
+
+The bronze schema:
+
+```sql
+event_id BIGINT
+dt VARCHAR
+```
+
+Was transformed into:
+
+```sql
+event_id BIGINT
+event_date DATE
+ingest_ts TIMESTAMP
+```
+
+The transformations include:
+
+- converting `dt` into a typed `DATE`
+- adding an `ingest_ts` timestamp column
+- enforcing a stable schema for downstream analytics
+
+#### Write Silver Dataset
+
+The transformed dataset is written to: `s3a://aether-lakehouse/silver/acp/sample_events/`
+
+With partitioning enabled: `partitionBy("event_date")`
+
+Therefore, the resulting storage layout is:
+
+```txt
+silver/acp/sample_events/
+    event_date=2026-03-02/
+        part-0000.parquet
+```
+
+**Note:** Partitioning improves query performance by allowing SQL query engines (Trino in this case) to prune irrelevant data during scans.
+
+---
+
+### Silver Dataset Registration
+
+In order to query the silver data through Trino, the dataset must be registered as an external table in the Hive Metastore.
+
+**Note:** The following SQL was executed using the ACP CLI `aether sql <SQL COMMAND>` format
+
+**Schema creation:**
+
+```sql
+CREATE SCHEMA IF NOT EXISTS raw.silver
+WITH (location='s3a://aether-lakehouse/silver/');
+```
+
+**Table registration:**
+
+```sql
+CREATE TABLE raw.silver.sample_events (
+  event_id bigint,
+  ingest_ts timestamp,
+  event_date date
+)
+WITH (
+  external_location='s3a://aether-lakehouse/silver/acp/sample_events/',
+  format='PARQUET',
+  partitioned_by = ARRAY['event_date']
+)
+```
+
+---
+
+
+### Partition Discovery
+
+#### Issue Encountered
+
+During validation of the silver transformation pipeline, initial queries returned empty counts:
+
+```sql
+SELECT count(*) FROM raw.silver.sample_events
+```
+
+returned 0 despite the fact that the Spark transformation reported: `SILVER_ROW_COUNT=100`, and the files were present in object storage.
+
+#### Root cause
+
+Spark successfully wrote partitioned silver Parquet files. However, the Hive Metastore had not yet discovered the partition folders.
+
+Spark created this partitioned directory structure:
+
+```txt
+event_date=2026-03-02/
+```
+
+This was as expected. But, the metastore initially only registered the table itself, and not the partitions.
+
+Consequently, Trine interpreted this as the table containing no partitions, resulting in the empty query result.
+
+#### Resolution
+
+Partition metadata was synchronised using the Trino system procedure:
+
+```sql
+CALL raw.system.sync_partition_metadata(
+    'silver',
+    'sample_events',
+    'FULL'
+)
+```
+
+This command searches the table's storage location and registers all partition folders within the metastore.
+
+After synchronisation, the partition: `event_data=2026-03-02` was correctly registered.
+
+#### Validation
+
+After the partition synchronisation, the silver dataset queries returned the anticipated results.
+
+**Row count validation:**
+
+```sql
+SELECT count(*) FROM raw.silver.sample_events
+```
+
+Returns `100`
+
+**Partition validation:**
+
+```sql
+
+SELECT event_date, count(*)
+FROM raw.silver.sample_events
+GROUP BY event_date
+
+```
+
+Returns `2026-03-02       100`
+
+**Schema validation:**
+
+```sql
+DESCRIBE raw.silver.sample_events
+```
+
+Returns:
+
+```sql
+event_id BIGINT
+event_date DATE
+ingest_ts TIMESTAMP
+```
+
+This verifies that the bronze to silver layer transformation pipeline is operating correctly.
+
+---
+
+### Some Takeaway Lessons
+
+This part of the ACP development exposed a common lakehouse behavioural quirk:
+
+- Object storage layout and SQL metadata must remain synchronised.
+
+So, when using external partitioned tables:
+
+- data files alone are not sufficient
+- the metastore must be made aware of partition locations
+
+Modern lakehouse formats such as Iceberg and Delta Lake handle metadata automatically.
+
+However, right now ACP uses Hive external tables that require explicit partition discovery.
+
+---
+
+### Outcomes
+
+I have successfully implemented the ACP Silver layer. Now, ACP supports bronze, silver data engineering workflows and the foundation of higher level analytics has been established.
+
+**Note:** Also implemented silver command wiring into the CLI (silver registration and silver synchronisation, and some basic verification queries: count and sample)
+
+---
+
+
+**STATUS: COMPLETE**
+
+ACP now supports:
+
+- Bronze to silver synchronisation
+
+- Silver data partitioning
+
+- Metadata synchronisation
+
+- Foundation for higher level analytics
+
+**Most importantly:**
+
+ACP now supports a real data engineering workflow
+
+---
+
+
