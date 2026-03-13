@@ -111,6 +111,10 @@ def _load_env_file(path: Path) -> dict[str, str]:
     return {k: expand(v) for k, v in raw.items()}
 
 
+def _compose_profile_args(airflow: bool) -> list[str]:
+    return ["--profile", "airflow"] if airflow else []
+
+
 # ======================================================================================================================
 # Trino helpers
 # ======================================================================================================================
@@ -168,7 +172,9 @@ WITH (
 # ======================================================================================================================
 
 @app.command()
-def up() -> None:
+def up(
+    airflow: bool = typer.Option(False, "--airflow", help="Start ACP with Airflow services enabled."),
+) -> None:
     """
     Starts the ACP stack with docker compose.
     """
@@ -180,39 +186,79 @@ def up() -> None:
         console.print("[red]Missing .env[/red]\n[yellow]Solution: cp .env.example .env[/yellow]")
         raise typer.Exit(code=2)
 
-    console.print("AETHER Cloud Platform starting...\n")
-    proc = _run(_compose_cmd(["up", "-d"]))
+    console.print("""[green]
+            
+          _____                    _____                    _____          
+         /\    \                  /\    \                  /\    \         
+        /::\    \                /::\    \                /::\    \        
+       /::::\    \              /::::\    \              /::::\    \       
+      /::::::\    \            /::::::\    \            /::::::\    \      
+     /:::/\:::\    \          /:::/\:::\    \          /:::/\:::\    \     
+    /:::/__\:::\    \        /:::/  \:::\    \        /:::/__\:::\    \    
+   /::::\   \:::\    \      /:::/    \:::\    \      /::::\   \:::\    \   
+  /::::::\   \:::\    \    /:::/    / \:::\    \    /::::::\   \:::\    \  
+ /:::/\:::\   \:::\    \  /:::/    /   \:::\    \  /:::/\:::\   \:::\____\ 
+/:::/  \:::\   \:::\____\/:::/____/     \:::\____\/:::/  \:::\   \:::|    |
+\::/    \:::\  /:::/    /\:::\    \      \::/    /\::/    \:::\  /:::|____|
+ \/____/ \:::\/:::/    /  \:::\    \      \/____/  \/_____/\:::\/:::/    / 
+          \::::::/    /    \:::\    \                       \::::::/    /  
+           \::::/    /      \:::\    \                       \::::/    /   
+           /:::/    /        \:::\    \                       \::/____/    
+          /:::/    /          \:::\    \                       ~~          
+         /:::/    /            \:::\    \                                  
+        /:::/    /              \:::\____\                              
+        \::/    /                \::/    /                                
+         \/____/                  \/____/                                  
+                                                                           
+                  
+ ===================| AETHER CLOUD PLATFORM STARTING |=====================               
+                  
+[/green]\n""")
+
+    extra = [*_compose_profile_args(airflow), "up", "-d"]
+    proc = _run(_compose_cmd(extra))
     if proc.returncode != 0:
         console.print("[red]docker compose up failed[/red]")
         raise typer.Exit(code=proc.returncode)
 
-    console.print("\n[green]ACP containers started.[/green]")
-    status()
+    if airflow:
+        console.print("\n[green]ACP containers started with Airflow.[/green]")
+    else:
+        console.print("\n[green]ACP containers started.[/green]")
+
+    status(airflow=airflow)
 
 
 @app.command()
-def down() -> None:
+def down(
+    airflow: bool = typer.Option(False, "--airflow", help="Stop ACP including Airflow profile services."),
+) -> None:
     """
     Stops the ACP stack.
     """
     if not ENV_FILE.exists():
         console.print("[yellow]No .env found, running down anyway.[/yellow]")
 
-    proc = _run(_compose_cmd(["down"]))
+    extra = [*_compose_profile_args(airflow), "down"]
+    proc = _run(_compose_cmd(extra))
     raise typer.Exit(code=proc.returncode)
 
 
 @app.command()
-def restart() -> None:
+def restart(
+    airflow: bool = typer.Option(False, "--airflow", help="Restart ACP including Airflow profile services."),
+) -> None:
     """
     Restarts the ACP stack.
     """
-    down()
-    up()
+    down(airflow=airflow)
+    up(airflow=airflow)
 
 
 @app.command()
-def status() -> None:
+def status(
+    airflow: bool = typer.Option(False, "--airflow", help="Show status including Airflow profile services."),
+) -> None:
     """
     Shows ACP status and docker compose ps output.
     """
@@ -222,10 +268,13 @@ def status() -> None:
 
     table.add_row("compose file", "OK" if COMPOSE_FILE.exists() else "MISSING")
     table.add_row("env file", "OK" if ENV_FILE.exists() else "MISSING")
+    table.add_row("airflow profile", "ENABLED" if airflow else "DISABLED")
 
     console.print(table)
     console.print()
-    _run(_compose_cmd(["ps"]))
+
+    extra = [*_compose_profile_args(airflow), "ps"]
+    _run(_compose_cmd(extra))
 
 
 @app.command()
@@ -256,6 +305,7 @@ def doctor() -> None:
         ("HIVE_METASTORE_HOST_PORT", env.get("HIVE_METASTORE_HOST_PORT")),
         ("PROMETHEUS_HOST_PORT", env.get("PROMETHEUS_HOST_PORT")),
         ("GRAFANA_HOST_PORT", env.get("GRAFANA_HOST_PORT")),
+        ("AIRFLOW_HOST_PORT", env.get("AIRFLOW_HOST_PORT")),
     ]
 
     busy_ports: list[str] = []
