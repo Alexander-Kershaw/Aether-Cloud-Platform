@@ -233,6 +233,119 @@ services:
     networks: [acp-net]
 
 
+  airflow-postgres:
+    profiles: ["airflow"]
+    image: postgres:16
+    container_name: acp-airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - ../data/airflow-postgres:/var/lib/postgresql/data
+    networks: [acp-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  airflow-init:
+    profiles: ["airflow"]
+    build:
+      context: ..
+      dockerfile: docker/airflow/Dockerfile
+    image: acp-airflow:local
+    container_name: acp-airflow-init
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "True"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+      AIRFLOW_UID: "50000"
+    user: "50000:0"
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags
+      - ../airflow/logs:/opt/airflow/logs
+      - ../airflow/plugins:/opt/airflow/plugins
+      - ..:/opt/airflow/acp
+    entrypoint: /bin/bash
+    command: |
+      -lc '
+      airflow db migrate &&
+      airflow users create \
+        --username admin \
+        --password admin \
+        --firstname Alex \
+        --lastname Admin \
+        --role Admin \
+        --email admin@example.com || true
+      '
+    networks: [acp-net]
+
+  airflow-webserver:
+    profiles: ["airflow"]
+    build:
+      context: ..
+      dockerfile: docker/airflow/Dockerfile
+    image: acp-airflow:local
+    container_name: acp-airflow-webserver
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "True"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
+      AIRFLOW_UID: "50000"
+    user: "50000:0"
+    ports:
+      - "${AIRFLOW_HOST_PORT}:8080"
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags
+      - ../airflow/logs:/opt/airflow/logs
+      - ../airflow/plugins:/opt/airflow/plugins
+      - ..:/opt/airflow/acp
+    command: webserver
+    networks: [acp-net]
+
+  airflow-scheduler:
+    profiles: ["airflow"]
+    build:
+      context: ..
+      dockerfile: docker/airflow/Dockerfile
+    image: acp-airflow:local
+    container_name: acp-airflow-scheduler
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "True"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+      AIRFLOW_UID: "50000"
+    user: "50000:0"
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags
+      - ../airflow/logs:/opt/airflow/logs
+      - ../airflow/plugins:/opt/airflow/plugins
+      - ..:/opt/airflow/acp
+    command: scheduler
+    networks: [acp-net]
+
+
 networks:
   acp-net:
     name: acp-net
