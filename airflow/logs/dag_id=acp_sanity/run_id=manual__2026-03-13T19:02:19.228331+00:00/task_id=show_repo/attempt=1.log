@@ -1,0 +1,52 @@
+[2026-03-13T19:02:20.213+0000] {local_task_job_runner.py:123} INFO - ::group::Pre task execution logs
+[2026-03-13T19:02:20.251+0000] {taskinstance.py:2614} INFO - Dependencies all met for dep_context=non-requeueable deps ti=<TaskInstance: acp_sanity.show_repo manual__2026-03-13T19:02:19.228331+00:00 [queued]>
+[2026-03-13T19:02:20.263+0000] {taskinstance.py:2614} INFO - Dependencies all met for dep_context=requeueable deps ti=<TaskInstance: acp_sanity.show_repo manual__2026-03-13T19:02:19.228331+00:00 [queued]>
+[2026-03-13T19:02:20.264+0000] {taskinstance.py:2867} INFO - Starting attempt 1 of 1
+[2026-03-13T19:02:20.282+0000] {taskinstance.py:2890} INFO - Executing <Task(BashOperator): show_repo> on 2026-03-13 19:02:19.228331+00:00
+[2026-03-13T19:02:20.301+0000] {standard_task_runner.py:104} INFO - Running: ['***', 'tasks', 'run', 'acp_sanity', 'show_repo', 'manual__2026-03-13T19:02:19.228331+00:00', '--job-id', '5', '--raw', '--subdir', 'DAGS_FOLDER/acp_sanity.py', '--cfg-path', '/tmp/tmpx6n7nutf']
+[2026-03-13T19:02:20.310+0000] {standard_task_runner.py:105} INFO - Job 5: Subtask show_repo
+[2026-03-13T19:02:20.314+0000] {logging_mixin.py:190} WARNING - /home/***/.local/lib/python3.12/site-packages/***/task/task_runner/standard_task_runner.py:70 DeprecationWarning: This process (pid=182) is multi-threaded, use of fork() may lead to deadlocks in the child.
+[2026-03-13T19:02:20.315+0000] {standard_task_runner.py:72} INFO - Started process 183 to run task
+[2026-03-13T19:02:20.401+0000] {task_command.py:467} INFO - Running <TaskInstance: acp_sanity.show_repo manual__2026-03-13T19:02:19.228331+00:00 [running]> on host e28b3d0e38f3
+[2026-03-13T19:02:20.522+0000] {taskinstance.py:3134} INFO - Exporting env vars: AIRFLOW_CTX_DAG_OWNER='***' AIRFLOW_CTX_DAG_ID='acp_sanity' AIRFLOW_CTX_TASK_ID='show_repo' AIRFLOW_CTX_EXECUTION_DATE='2026-03-13T19:02:19.228331+00:00' AIRFLOW_CTX_TRY_NUMBER='1' AIRFLOW_CTX_DAG_RUN_ID='manual__2026-03-13T19:02:19.228331+00:00'
+[2026-03-13T19:02:20.523+0000] {taskinstance.py:732} INFO - ::endgroup::
+[2026-03-13T19:02:20.548+0000] {subprocess.py:78} INFO - Tmp dir root location: /tmp
+[2026-03-13T19:02:20.549+0000] {subprocess.py:88} INFO - Running command: ['/usr/bin/bash', '-c', '\n        echo "=====|Checking ACP repo mount|====="\n        cd /opt/***/acp\n        pwd\n        ls -la\n        echo "=====|Checking DAG mount|====="\n        ls -la /opt/***/dags\n        echo "=====|Python version|====="\n        python --version\n        ']
+[2026-03-13T19:02:20.561+0000] {subprocess.py:99} INFO - Output:
+[2026-03-13T19:02:20.566+0000] {subprocess.py:106} INFO - =====|Checking ACP repo mount|=====
+[2026-03-13T19:02:20.567+0000] {subprocess.py:106} INFO - /opt/***/acp
+[2026-03-13T19:02:20.571+0000] {subprocess.py:106} INFO - total 40
+[2026-03-13T19:02:20.572+0000] {subprocess.py:106} INFO - drwxr-xr-x 18 *** root  576 Mar 13 18:01 .
+[2026-03-13T19:02:20.572+0000] {subprocess.py:106} INFO - drwxrwxr-x  1 *** root 4096 Mar 13 18:27 ..
+[2026-03-13T19:02:20.572+0000] {subprocess.py:106} INFO - -rw-r--r--  1 *** root 6148 Mar 13 18:47 .DS_Store
+[2026-03-13T19:02:20.572+0000] {subprocess.py:106} INFO - -rw-r--r--  1 *** root  666 Mar 13 18:24 .env
+[2026-03-13T19:02:20.572+0000] {subprocess.py:106} INFO - -rw-r--r--  1 *** root  659 Mar 13 18:24 .env.example
+[2026-03-13T19:02:20.573+0000] {subprocess.py:106} INFO - drwxr-xr-x 16 *** root  512 Mar 12 22:54 .git
+[2026-03-13T19:02:20.573+0000] {subprocess.py:106} INFO - -rw-r--r--  1 *** root  210 Mar  7 15:05 .gitignore
+[2026-03-13T19:02:20.573+0000] {subprocess.py:106} INFO - -rw-r--r--  1 *** root 5563 Mar  7 16:03 README.md
+[2026-03-13T19:02:20.573+0000] {subprocess.py:106} INFO - drwxr-xr-x  7 *** root  224 Mar 12 10:29 aether
+[2026-03-13T19:02:20.573+0000] {subprocess.py:106} INFO - -rwxr-xr-x  1 *** root   60 Mar  2 13:35 aether.sh
+[2026-03-13T19:02:20.573+0000] {subprocess.py:106} INFO - drwxr-xr-x  8 *** root  256 Mar  2 13:27 aether_cloud_platform.egg-info
+[2026-03-13T19:02:20.573+0000] {subprocess.py:106} INFO - drwxr-xr-x  6 *** root  192 Mar 13 18:46 ***
+[2026-03-13T19:02:20.573+0000] {subprocess.py:106} INFO - drwxr-xr-x  9 *** root  288 Mar  3 11:27 config
+[2026-03-13T19:02:20.574+0000] {subprocess.py:106} INFO - drwxr-xr-x  9 *** root  288 Mar 13 18:25 data
+[2026-03-13T19:02:20.574+0000] {subprocess.py:106} INFO - drwxr-xr-x  5 *** root  160 Mar 13 18:16 docker
+[2026-03-13T19:02:20.574+0000] {subprocess.py:106} INFO - drwxr-xr-x  9 *** root  288 Mar 12 11:31 docs
+[2026-03-13T19:02:20.574+0000] {subprocess.py:106} INFO - -rw-r--r--  1 *** root  365 Mar  2 13:26 pyproject.toml
+[2026-03-13T19:02:20.574+0000] {subprocess.py:106} INFO - drwxr-xr-x 13 *** root  416 Mar 12 21:35 scripts
+[2026-03-13T19:02:20.574+0000] {subprocess.py:106} INFO - =====|Checking DAG mount|=====
+[2026-03-13T19:02:20.574+0000] {subprocess.py:106} INFO - total 20
+[2026-03-13T19:02:20.575+0000] {subprocess.py:106} INFO - drwxr-xr-x 6 *** root  192 Mar 13 18:47 .
+[2026-03-13T19:02:20.575+0000] {subprocess.py:106} INFO - drwxrwxr-x 1 *** root 4096 Mar 13 18:27 ..
+[2026-03-13T19:02:20.575+0000] {subprocess.py:106} INFO - -rw-r--r-- 1 *** root 6148 Mar 13 18:47 .DS_Store
+[2026-03-13T19:02:20.575+0000] {subprocess.py:106} INFO - drwxr-xr-x 4 *** root  128 Mar 13 19:02 __pycache__
+[2026-03-13T19:02:20.575+0000] {subprocess.py:106} INFO - -rw-r--r-- 1 *** root 1012 Mar 13 18:25 acp_pipeline.py
+[2026-03-13T19:02:20.575+0000] {subprocess.py:106} INFO - -rw-r--r-- 1 *** root  598 Mar 13 19:02 acp_sanity.py
+[2026-03-13T19:02:20.575+0000] {subprocess.py:106} INFO - =====|Python version|=====
+[2026-03-13T19:02:20.589+0000] {subprocess.py:106} INFO - Python 3.12.9
+[2026-03-13T19:02:20.589+0000] {subprocess.py:110} INFO - Command exited with return code 0
+[2026-03-13T19:02:20.627+0000] {taskinstance.py:341} INFO - ::group::Post task execution logs
+[2026-03-13T19:02:20.628+0000] {taskinstance.py:353} INFO - Marking task as SUCCESS. dag_id=acp_sanity, task_id=show_repo, run_id=manual__2026-03-13T19:02:19.228331+00:00, execution_date=20260313T190219, start_date=20260313T190220, end_date=20260313T190220
+[2026-03-13T19:02:20.707+0000] {local_task_job_runner.py:266} INFO - Task exited with return code 0
+[2026-03-13T19:02:20.725+0000] {taskinstance.py:3901} INFO - 0 downstream tasks scheduled from follow-on schedule check
+[2026-03-13T19:02:20.726+0000] {local_task_job_runner.py:245} INFO - ::endgroup::

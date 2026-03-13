@@ -1,0 +1,69 @@
+[2026-03-13T19:50:08.226+0000] {local_task_job_runner.py:123} INFO - ::group::Pre task execution logs
+[2026-03-13T19:50:08.255+0000] {taskinstance.py:2614} INFO - Dependencies all met for dep_context=non-requeueable deps ti=<TaskInstance: acp_sanity.show_repo manual__2026-03-13T19:50:06.775777+00:00 [queued]>
+[2026-03-13T19:50:08.265+0000] {taskinstance.py:2614} INFO - Dependencies all met for dep_context=requeueable deps ti=<TaskInstance: acp_sanity.show_repo manual__2026-03-13T19:50:06.775777+00:00 [queued]>
+[2026-03-13T19:50:08.265+0000] {taskinstance.py:2867} INFO - Starting attempt 1 of 1
+[2026-03-13T19:50:08.275+0000] {taskinstance.py:2890} INFO - Executing <Task(BashOperator): show_repo> on 2026-03-13 19:50:06.775777+00:00
+[2026-03-13T19:50:08.280+0000] {standard_task_runner.py:104} INFO - Running: ['***', 'tasks', 'run', 'acp_sanity', 'show_repo', 'manual__2026-03-13T19:50:06.775777+00:00', '--job-id', '11', '--raw', '--subdir', 'DAGS_FOLDER/acp_sanity.py', '--cfg-path', '/tmp/tmpnvne1qwx']
+[2026-03-13T19:50:08.283+0000] {standard_task_runner.py:105} INFO - Job 11: Subtask show_repo
+[2026-03-13T19:50:08.283+0000] {logging_mixin.py:190} WARNING - /home/***/.local/lib/python3.12/site-packages/***/task/task_runner/standard_task_runner.py:70 DeprecationWarning: This process (pid=187) is multi-threaded, use of fork() may lead to deadlocks in the child.
+[2026-03-13T19:50:08.283+0000] {standard_task_runner.py:72} INFO - Started process 188 to run task
+[2026-03-13T19:50:08.323+0000] {task_command.py:467} INFO - Running <TaskInstance: acp_sanity.show_repo manual__2026-03-13T19:50:06.775777+00:00 [running]> on host 19990d1ac7bd
+[2026-03-13T19:50:08.405+0000] {taskinstance.py:3134} INFO - Exporting env vars: AIRFLOW_CTX_DAG_OWNER='***' AIRFLOW_CTX_DAG_ID='acp_sanity' AIRFLOW_CTX_TASK_ID='show_repo' AIRFLOW_CTX_EXECUTION_DATE='2026-03-13T19:50:06.775777+00:00' AIRFLOW_CTX_TRY_NUMBER='1' AIRFLOW_CTX_DAG_RUN_ID='manual__2026-03-13T19:50:06.775777+00:00'
+[2026-03-13T19:50:08.405+0000] {taskinstance.py:732} INFO - ::endgroup::
+[2026-03-13T19:50:08.448+0000] {subprocess.py:78} INFO - Tmp dir root location: /tmp
+[2026-03-13T19:50:08.449+0000] {subprocess.py:88} INFO - Running command: ['/usr/bin/bash', '-c', '\n        echo "=====|Checking ACP repo mount|====="\n        cd /opt/***/acp\n        pwd\n        ls -la\n\n        echo "=====|Python version|====="\n        python --version\n\n        echo "=====|Try package import|====="\n        python -c "import aether; print(\'aether import OK\')"\n\n        echo "=====|Try CLI help|====="\n        python -m aether.cli --help\n        ']
+[2026-03-13T19:50:08.455+0000] {subprocess.py:99} INFO - Output:
+[2026-03-13T19:50:08.462+0000] {subprocess.py:106} INFO - =====|Checking ACP repo mount|=====
+[2026-03-13T19:50:08.462+0000] {subprocess.py:106} INFO - /opt/***/acp
+[2026-03-13T19:50:08.469+0000] {subprocess.py:106} INFO - total 40
+[2026-03-13T19:50:08.469+0000] {subprocess.py:106} INFO - drwxr-xr-x 18 *** root  576 Mar 13 18:01 .
+[2026-03-13T19:50:08.469+0000] {subprocess.py:106} INFO - drwxrwxr-x  1 *** root 4096 Mar 13 19:49 ..
+[2026-03-13T19:50:08.470+0000] {subprocess.py:106} INFO - -rw-r--r--  1 *** root 6148 Mar 13 18:47 .DS_Store
+[2026-03-13T19:50:08.470+0000] {subprocess.py:106} INFO - -rw-r--r--  1 *** root  666 Mar 13 18:24 .env
+[2026-03-13T19:50:08.470+0000] {subprocess.py:106} INFO - -rw-r--r--  1 *** root  659 Mar 13 18:24 .env.example
+[2026-03-13T19:50:08.470+0000] {subprocess.py:106} INFO - drwxr-xr-x 16 *** root  512 Mar 12 22:54 .git
+[2026-03-13T19:50:08.470+0000] {subprocess.py:106} INFO - -rw-r--r--  1 *** root  210 Mar  7 15:05 .gitignore
+[2026-03-13T19:50:08.470+0000] {subprocess.py:106} INFO - -rw-r--r--  1 *** root 5563 Mar  7 16:03 README.md
+[2026-03-13T19:50:08.471+0000] {subprocess.py:106} INFO - drwxr-xr-x  7 *** root  224 Mar 12 10:29 aether
+[2026-03-13T19:50:08.471+0000] {subprocess.py:106} INFO - -rwxr-xr-x  1 *** root   60 Mar  2 13:35 aether.sh
+[2026-03-13T19:50:08.471+0000] {subprocess.py:106} INFO - drwxr-xr-x  8 *** root  256 Mar  2 13:27 aether_cloud_platform.egg-info
+[2026-03-13T19:50:08.471+0000] {subprocess.py:106} INFO - drwxr-xr-x  6 *** root  192 Mar 13 18:46 ***
+[2026-03-13T19:50:08.471+0000] {subprocess.py:106} INFO - drwxr-xr-x  9 *** root  288 Mar  3 11:27 config
+[2026-03-13T19:50:08.471+0000] {subprocess.py:106} INFO - drwxr-xr-x  9 *** root  288 Mar 13 18:25 data
+[2026-03-13T19:50:08.472+0000] {subprocess.py:106} INFO - drwxr-xr-x  5 *** root  160 Mar 13 18:16 docker
+[2026-03-13T19:50:08.472+0000] {subprocess.py:106} INFO - drwxr-xr-x  9 *** root  288 Mar 12 11:31 docs
+[2026-03-13T19:50:08.472+0000] {subprocess.py:106} INFO - -rw-r--r--  1 *** root  365 Mar  2 13:26 pyproject.toml
+[2026-03-13T19:50:08.472+0000] {subprocess.py:106} INFO - drwxr-xr-x 13 *** root  416 Mar 12 21:35 scripts
+[2026-03-13T19:50:08.472+0000] {subprocess.py:106} INFO - =====|Python version|=====
+[2026-03-13T19:50:08.477+0000] {subprocess.py:106} INFO - Python 3.12.9
+[2026-03-13T19:50:08.477+0000] {subprocess.py:106} INFO - =====|Try package import|=====
+[2026-03-13T19:50:08.514+0000] {subprocess.py:106} INFO - aether import OK
+[2026-03-13T19:50:08.516+0000] {subprocess.py:106} INFO - =====|Try CLI help|=====
+[2026-03-13T19:50:09.065+0000] {subprocess.py:106} INFO - 
+[2026-03-13T19:50:09.066+0000] {subprocess.py:106} INFO -  Usage: python -m aether.cli [OPTIONS] COMMAND [ARGS]...
+[2026-03-13T19:50:09.066+0000] {subprocess.py:106} INFO - 
+[2026-03-13T19:50:09.066+0000] {subprocess.py:106} INFO -  AETHER Cloud Platform (ACP) CLI
+[2026-03-13T19:50:09.066+0000] {subprocess.py:106} INFO - 
+[2026-03-13T19:50:09.067+0000] {subprocess.py:106} INFO - ╭─ Options ────────────────────────────────────────────────────────────────────╮
+[2026-03-13T19:50:09.067+0000] {subprocess.py:106} INFO - │ --help          Show this message and exit.                                  │
+[2026-03-13T19:50:09.067+0000] {subprocess.py:106} INFO - ╰──────────────────────────────────────────────────────────────────────────────╯
+[2026-03-13T19:50:09.068+0000] {subprocess.py:106} INFO - ╭─ Commands ───────────────────────────────────────────────────────────────────╮
+[2026-03-13T19:50:09.068+0000] {subprocess.py:106} INFO - │ up          Starts the ACP stack with docker compose.                        │
+[2026-03-13T19:50:09.068+0000] {subprocess.py:106} INFO - │ down        Stops the ACP stack.                                             │
+[2026-03-13T19:50:09.068+0000] {subprocess.py:106} INFO - │ restart     Restarts the ACP stack.                                          │
+[2026-03-13T19:50:09.069+0000] {subprocess.py:106} INFO - │ status      Shows ACP status and docker compose ps output.                   │
+[2026-03-13T19:50:09.069+0000] {subprocess.py:106} INFO - │ doctor      Runs quick ACP diagnostics.                                      │
+[2026-03-13T19:50:09.069+0000] {subprocess.py:106} INFO - │ spark-run   Submits a Spark job through the Spark master container.          │
+[2026-03-13T19:50:09.069+0000] {subprocess.py:106} INFO - │ ls          Lists objects in MinIO using the mc client.                      │
+[2026-03-13T19:50:09.069+0000] {subprocess.py:106} INFO - │ sql         Executes a SQL query in Trino.                                   │
+[2026-03-13T19:50:09.069+0000] {subprocess.py:106} INFO - │ bronze      Bronze layer utilities (raw external tables)                     │
+[2026-03-13T19:50:09.069+0000] {subprocess.py:106} INFO - │ redpanda    Redpanda utilities                                               │
+[2026-03-13T19:50:09.069+0000] {subprocess.py:106} INFO - │ silver      Silver layer operations                                          │
+[2026-03-13T19:50:09.070+0000] {subprocess.py:106} INFO - ╰──────────────────────────────────────────────────────────────────────────────╯
+[2026-03-13T19:50:09.070+0000] {subprocess.py:106} INFO - 
+[2026-03-13T19:50:09.089+0000] {subprocess.py:110} INFO - Command exited with return code 0
+[2026-03-13T19:50:09.113+0000] {taskinstance.py:341} INFO - ::group::Post task execution logs
+[2026-03-13T19:50:09.113+0000] {taskinstance.py:353} INFO - Marking task as SUCCESS. dag_id=acp_sanity, task_id=show_repo, run_id=manual__2026-03-13T19:50:06.775777+00:00, execution_date=20260313T195006, start_date=20260313T195008, end_date=20260313T195009
+[2026-03-13T19:50:09.167+0000] {local_task_job_runner.py:266} INFO - Task exited with return code 0
+[2026-03-13T19:50:09.182+0000] {taskinstance.py:3901} INFO - 0 downstream tasks scheduled from follow-on schedule check
+[2026-03-13T19:50:09.183+0000] {local_task_job_runner.py:245} INFO - ::endgroup::
