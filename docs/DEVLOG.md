@@ -1499,6 +1499,255 @@ ACP successfully executed a full data lifecycle, transforming raw data in bronze
 
 ---
 
+## Apache Airflow Orchestration
+
+Here I introduce workflow orchestration into ACP using Apache Airflow. Until this point ACP had all the core infrastructure paramount to operate a modern analytics platform. However, these component, although enabling data processing, do not provide any automated workflow scheduling or dependency management.
+
+Airflow serves to address this.
+
+---
+
+### Objective
+
+I want to introduce a workflow orchestration layer capable of:
+
+- Scheduling ACP platflom jobs
+- Managing pipeline dependencies
+- Providing execution monitoring
+- Logging task execution
+- Running ACP CLI commands programmatically
+
+The purpose of this step is for ACP to eventually run automatically through Airflow DAGs, with Airflow orchestrating bronze ingestion, silver transformation, and gold aggregation while ACP actually performs the work.
+
+---
+
+### Integrating Airflow into ACP
+
+I initially worked on integrating Airflow into the existing docker-based ACP platform service stack.
+
+Instead of running Airflow in a seperate container, it was integrating directly into the main ACP docker compose environment so it shares the same network and service topology.
+
+Therefore, DAG tasks can directly interact with services such as:
+
+- Spark
+- Trino
+- MinIO
+- Redpanda
+- Hive Metastore
+
+The added airflow services are as follows:
+
+- airflow-postgres
+- airflow-init
+- airflow-webserver
+- airflow-scheduler
+
+
+#### Airflow Medtadata Database
+
+Airflow requires a metadata database for:
+
+- DAG run history
+- Task state
+- Logs
+- Schedualing metadata
+
+the `airflow-postgres` service was added to be dedicated to this task.
+
+---
+
+### Airflow Initialization Container
+
+Airflow requires a singular initialization process.
+
+So, the `airflow-init` container performs:
+
+- `airflow db migrate`
+- `airflow users create`
+
+Which initializes:
+
+- the Airflow metadata database
+- the admin user used for login on the airflow scheduler web interface
+
+This container exited after completion which is the expected behaviour.
+
+
+---
+
+### Optional Airflow Startup via ACP CLI
+
+I integrated Airflow into the ACP CLI lifecycle.
+
+ACP can now be started with Airflow orchestration with:
+
+```bash
+aether up --airflow
+```
+
+or without orchestration:
+
+```bash
+aether up
+```
+
+This was implemented using docker compose profiles, allowing the Airflow services to be optional. This avoids the additional orchestration overhead when running ACP interactively.
+
+---
+
+### Airflow Directory Structure
+
+Airflow requires specific directories for DAG definition and log storage.
+
+Therefore, ACP now contains:
+
+```txt
+airflow/
+ ├─ dags
+ ├─ logs
+ └─ plugins
+```
+
+These directories are mounted into the Airflow containers:
+
+```txt
+/opt/airflow/dags
+/opt/airflow/logs
+```
+
+This permits the DAGs to be edited locally while Airflow automatically loads them.
+
+---
+
+### Verifying Airflow DAG Loading
+
+I created a simple DAG to verify:
+
+- DAG Discovery works
+- Airflow can execute tasks
+- Mounted directories are visible inside the container
+
+#### Sanity DAG
+
+```bash
+acp_sanity.py
+```
+
+This DAG executes a Bash task which checks:
+
+```bash
+/opt/airflow/acp
+/opt/airflow/dags
+python runtime
+```
+
+Example output:
+
+```bash
+=====|Checking ACP repo mount|=====
+/opt/airflow/acp
+README.md
+aether/
+scripts/
+...
+
+=====|Python version|=====
+Python 3.12.9
+```
+
+---
+
+### Airflow Runtime Environment Issue
+
+Next I attempted to execute the ACP CLI from inside Airflow:
+
+```bash
+python -m aether.cli --help
+```
+
+This initially failed with:
+
+```bash
+ModuleNotFoundError: No module named 'typer'
+```
+
+The reason for this is that the default Airflow image did not contain the ACP python dependencies.
+
+So a custom Airflow image was to be made.
+
+---
+
+### Building a Custom Airflow Image
+
+To resolve the dependencies issue, a custom Airflow image was created:
+
+```bash
+docker/airflow/Dockerfile
+```
+
+Base image:
+```bash
+apache/airflow:2.10.5
+```
+
+The Dockerfile installs ACP as a Python package:
+
+```bash
+pip install /opt/airflow/acp
+```
+
+This automatically installs dependencies that are defined in `pyproject.toml`, including `typer` and `rich` dependencies.
+
+#### Permission Issue Encountered
+
+During installation the build failed with:
+
+```bash
+Permission denied creating egg-info
+```
+
+This happened because the ACP source files were copied as `root` while the build step ran as the `airflow` user.
+
+This fix was applied to copy files with correct ownership:
+
+```bash
+COPY --chown=airflow:root
+```
+
+---
+
+### Verifying ACP CLI Inside Airflow
+
+After rebuilding the Airflow containers, the sanidy DAG was updated to test ACP CLI execuation.
+
+With this, Airflow successfully executed:
+```
+python -m aether.cli --help
+```
+
+Output:
+
+```bash
+AETHER Cloud Platform (ACP) CLI
+
+Commands:
+up
+down
+restart
+status
+doctor
+spark-run
+ls
+sql
+bronze
+redpanda
+silver
+```
+
+This proved that the Airflow tasks can run ACP commands.
+
+---
+
 
 
 
