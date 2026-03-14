@@ -272,6 +272,7 @@ services:
       - ../airflow/logs:/opt/airflow/logs
       - ../airflow/plugins:/opt/airflow/plugins
       - ..:/opt/airflow/acp
+      - /var/run/docker.sock:/var/run/docker.sock
     entrypoint: /bin/bash
     command: |
       -lc '
@@ -314,6 +315,7 @@ services:
       - ../airflow/logs:/opt/airflow/logs
       - ../airflow/plugins:/opt/airflow/plugins
       - ..:/opt/airflow/acp
+      - /var/run/docker.sock:/var/run/docker.sock
     command: webserver
     networks: [acp-net]
 
@@ -342,6 +344,7 @@ services:
       - ../airflow/logs:/opt/airflow/logs
       - ../airflow/plugins:/opt/airflow/plugins
       - ..:/opt/airflow/acp
+      - /var/run/docker.sock:/var/run/docker.sock
     command: scheduler
     networks: [acp-net]
 
