@@ -251,9 +251,9 @@ def up(
 
     console.print("""[green]
                   
-==================================================================================================================
+==============================================================================================
                   
-==================================================================================================================
+==============================================================================================
               
                           
           _____                    _____                    _____          
@@ -279,13 +279,13 @@ def up(
          \/____/                  \/____/                                  
                 
                   
-==================================================================================================================
+===============================================================================================
                   
-==================================================================================================================
+===============================================================================================
                                
                                     
 
-                  ===================| AETHER CLOUD PLATFORM STARTING... |=====================               
+        ===================| AETHER CLOUD PLATFORM STARTING... |=====================               
                   
 [/green]\n""")
 
@@ -582,6 +582,15 @@ def bronze_describe(
     _show_describe("bronze", project, table)
 
 
+@bronze_app.command("drop")
+def bronze_drop(
+    table: str = typer.Argument(..., help="Bronze dataset name"),
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
+) -> None:
+    target = _layer_table("bronze", project, table)
+    trino_exec(f"DROP TABLE IF EXISTS {target}")
+    console.print(f"[green]Dropped[/green] {target}")
+
 # ======================================================================================================================
 # Silver commands
 # ======================================================================================================================
@@ -678,6 +687,15 @@ def silver_describe(
     _show_describe("silver", project, table)
 
 
+@silver_app.command("drop")
+def silver_drop(
+    table: str = typer.Argument(..., help="Silver dataset name"),
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
+) -> None:
+    target = _layer_table("silver", project, table)
+    trino_exec(f"DROP TABLE IF EXISTS {target}")
+    console.print(f"[green]Dropped[/green] {target}")
+
 # ======================================================================================================================
 # Gold Commands
 # ======================================================================================================================
@@ -773,6 +791,16 @@ def gold_describe(
     project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
 ) -> None:
     _show_describe("gold", project, model)
+
+
+@gold_app.command("drop")
+def gold_drop(
+    model: str = typer.Argument(..., help="Gold model name"),
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
+) -> None:
+    target = _layer_table("gold", project, model)
+    trino_exec(f"DROP TABLE IF EXISTS {target}")
+    console.print(f"[green]Dropped[/green] {target}")
 
 # ======================================================================================================================
 
