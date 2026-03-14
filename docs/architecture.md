@@ -563,55 +563,85 @@ Each stage improves the reliability and analytical usability of the data.
 
 ### Apache Airflow Orchestration
 
+ACP uses **Apache Airflow Orchestration** to orchestrate platform pipelines. Airflow coordinates the execution of Spark jobs and CLI operations to perform data ingestion, transformation, and aggregation across the aether lakehouse architecture layers.
+
+Airflow does not contain any business or operational context logic in itself. 
+
+Instead, it schedules and sequences existing defined ACP jobs (organized in `/scripts`).
+
+This keeps the orchestration seperate from the data transformation logic.
+
+#### Execution Model
+
+ACP pipelines follows the standard layered lackhouse workflow:
+
+- bronze ingestion
+- bronze to silver transformation
+- silver to gold aggregation
+- validation and monitoring 
+
+Spark performs the compute operation while Airflow manages execution sequencing and scheduling.
+
+#### Orchestration Flow
+
 ```mermaid
 flowchart LR
 
-    subgraph Orchestration["Apache Airflow Orchestration Layer"]
-        A[Airflow Scheduler]
-        B[Airflow Webserver]
-        C[ACP Pipeline DAGs]
-    end
+A[Apache Airflow DAG]
+B[Spark Bronze Ingestion]
+C[Spark Bronze → Silver]
+D[Spark Silver → Gold]
+E[Gold Validation]
 
-    subgraph Control["ACP Control Layer"]
-        D[ACP CLI]
-    end
-
-    subgraph Processing["Data Processing Layer"]
-        E[Bronze Ingestion]
-        F[Silver Transformations]
-        G[Gold Aggregations]
-    end
-
-    subgraph Platform["ACP Platform Services"]
-        H[Redpanda]
-        I[Spark]
-        J[MinIO]
-        K[Hive Metastore]
-        L[Trino]
-    end
-
-    A --> C
-    B --> C
-    C --> D
-
-    D --> E
-    D --> F
-    D --> G
-
-    E --> H
-    E --> I
-    E --> J
-
-    F --> I
-    F --> J
-    F --> K
-
-    G --> I
-    G --> J
-    G --> K
-    G --> L
+A --> B --> C --> D --> E
 
 ```
+
+#### Platform Integration
+
+Airflow interacts with ACP through the CLI later.
+
+Some tasks execute commands such as:
+
+```bash
+aether spark-run
+aether ls
+aether sql
+```
+
+These commands operate the underlying platforms services including, Spark, MinIO, and Trino
+
+#### ODIN Pipeline Example
+
+The Odin flight analytics pipeline demonstrates the end-to-end orchestration model.
+
+```mermaid
+flowchart LR
+
+A[ingest_odin_bronze]
+B[bronze_to_silver_odin]
+C[silver_to_gold_odin]
+D[validate_gold_output]
+
+A --> B --> C --> D
+```
+
+Each step represents a descrite compute stage executed through airflow
+
+#### Benefits of Airflow
+
+Apache Airflow supplements ACP with several capabilities:
+
+- automated pipeline execution
+- dependency management
+- retry handling
+- monitoring and logging
+- scheduling
+
+This effectively transforms ACP into a fully orchestrated analytics platforms rather than a manually operated stack of services
+
+---
+
 
 ### Platform Goals
 
@@ -642,7 +672,6 @@ Planned architectural expansions include:
 * observability and monitoring stack
 * dataset quality validation
 * automated metadata management
-* job orchestration workflows
 * distributed compute scaling
 * data lineage tracking
 
@@ -655,4 +684,7 @@ These extensions will further evolve ACP into a complete demonstration platform 
 AETHER Cloud Platform demonstrates the core components and operational workflows of a modern lakehouse architecture. By combining distributed compute, object storage, metadata services, and SQL query engines, ACP provides a realistic environment for developing and testing large-scale data engineering systems.
 
 The platform emphasizes clear architectural separation, reproducible infrastructure, and extensible dataset pipelines, enabling it to grow alongside new analytical domains and projects.
+
+
+
 
