@@ -16,16 +16,25 @@ app = typer.Typer(add_completion=False, help="AETHER Cloud Platform (ACP) CLI")
 bronze_app = typer.Typer(help="Bronze layer utilities (raw external tables)")
 redpanda_app = typer.Typer(help="Redpanda utilities")
 silver_app = typer.Typer(help="Silver layer operations")
+gold_app = typer.Typer(help="Gold layer operations")
 
 app.add_typer(bronze_app, name="bronze")
 app.add_typer(redpanda_app, name="redpanda")
 app.add_typer(silver_app, name="silver")
+app.add_typer(gold_app, name="gold")
 
 console = Console()
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COMPOSE_FILE = REPO_ROOT / "docker" / "compose.yml"
 ENV_FILE = REPO_ROOT / ".env"
+
+DEFAULT_PROJECT = "acp"
+LAKEHOUSE_BUCKET = "aether-lakehouse"
+
+BRONZE_SQL_DIR = REPO_ROOT / "scripts" / "sql" / "bronze"
+SILVER_SQL_DIR = REPO_ROOT / "scripts" / "sql" / "silver"
+GOLD_SQL_DIR = REPO_ROOT / "scripts" / "sql" / "gold"
 
 
 _VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -154,18 +163,72 @@ WITH (location='s3a://aether-lakehouse/bronze/');
 """.strip()
 
 
-def _bronze_create_table_sql(table: str, dt: str) -> str:
+# No longer hardcoded to ACP sample events (supports multiple project platform)
+def _bronze_create_table_sql(table: str, project: str, dt: str) -> str:
     return f"""
-CREATE TABLE raw.bronze.{table} (
+CREATE TABLE {_layer_table('bronze', project, table)} (
   event_id bigint,
   dt varchar
 )
 WITH (
-  external_location='s3a://aether-lakehouse/bronze/acp/sample_events/dt={dt}/',
+  external_location='{_layer_location('bronze', project, table)}dt={dt}/',
   format='PARQUET'
 );
 """.strip()
 
+# ======================================================================================================================
+# Location / table / project discovery helpers
+# ======================================================================================================================
+
+def _layer_location(layer: str, project: str, name: str) -> str:
+    return f"s3a://{LAKEHOUSE_BUCKET}/{layer}/{project}/{name}/"
+
+
+def _layer_table(layer: str, project: str, name: str) -> str:
+    return f"raw.{layer}.{project}_{name}"
+
+
+def _project_model_dir(base_dir: Path, project: str) -> Path:
+    return base_dir / project
+
+
+# ======================================================================================================================
+# SQL helpers (list sql models, give path, read sql) 
+# ======================================================================================================================
+
+def _list_sql_models(directory: Path) -> list[str]:
+    if not directory.exists():
+        return []
+    return sorted(p.stem for p in directory.glob("*.sql"))
+
+
+def _sql_model_path(directory: Path, model: str) -> Path:
+    return directory / f"{model}.sql"
+
+
+def _read_sql_file(path: Path) -> str:
+    if not path.exists():
+        raise FileNotFoundError(f"SQL file not found: {path}")
+    return path.read_text(encoding="utf-8")
+
+# ======================================================================================================================
+# Table inspection helpers
+# ======================================================================================================================
+
+def _show_tables(layer: str) -> None:
+    trino_exec(f"SHOW TABLES FROM raw.{layer}")
+
+
+def _show_count(layer: str, project: str, name: str) -> None:
+    trino_exec(f"SELECT count(*) AS n FROM {_layer_table(layer, project, name)}")
+
+
+def _show_sample(layer: str, project: str, name: str, limit: int = 10) -> None:
+    trino_exec(f"SELECT * FROM {_layer_table(layer, project, name)} LIMIT {limit}")
+
+
+def _show_describe(layer: str, project: str, name: str) -> None:
+    trino_exec(f"DESCRIBE {_layer_table(layer, project, name)}")
 
 # ======================================================================================================================
 # Stack lifecycle commands
@@ -187,7 +250,12 @@ def up(
         raise typer.Exit(code=2)
 
     console.print("""[green]
-            
+                  
+==================================================================================================================
+                  
+==================================================================================================================
+              
+                          
           _____                    _____                    _____          
          /\    \                  /\    \                  /\    \         
         /::\    \                /::\    \                /::\    \        
@@ -209,9 +277,15 @@ def up(
         /:::/    /              \:::\____\                              
         \::/    /                \::/    /                                
          \/____/                  \/____/                                  
-                                                                           
+                
                   
- ===================| AETHER CLOUD PLATFORM STARTING |=====================               
+==================================================================================================================
+                  
+==================================================================================================================
+                               
+                                    
+
+                  ===================| AETHER CLOUD PLATFORM STARTING... |=====================               
                   
 [/green]\n""")
 
@@ -456,8 +530,9 @@ def sql(
 
 @bronze_app.command("register")
 def bronze_register(
-    table: str = typer.Argument(..., help="Table name to register in raw.bronze"),
-    dt: str = typer.Argument(..., help="Partition date, e.g. 2026-03-02"),
+    table: str = typer.Argument(..., help="Bronze dataset name"),
+    dt: str = typer.Option(..., "--dt", help="Partition date, e.g. 2026-03-02"),
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
     drop_first: bool = typer.Option(True, "--drop/--no-drop", help="Drop table first to re-register cleanly"),
 ) -> None:
     """
@@ -465,50 +540,46 @@ def bronze_register(
     """
     trino_exec(_bronze_schema_sql())
 
+    target = _layer_table("bronze", project, table)
+
     if drop_first:
-        trino_exec(f"DROP TABLE IF EXISTS raw.bronze.{table}")
+        trino_exec(f"DROP TABLE IF EXISTS {target}")
 
-    trino_exec(_bronze_create_table_sql(table, dt))
-    typer.echo(f"Registered raw.bronze.{table} for dt={dt}")
+    trino_exec(_bronze_create_table_sql(table, project, dt))
+    console.print(f"[green]Registered[/green] {target} [cyan]for[/cyan] dt={dt}")
 
 
-@bronze_app.command("tables")
-def bronze_tables() -> None:
+@bronze_app.command("ls")
+def bronze_ls() -> None:
     """
     Lists tables in raw.bronze.
     """
-    trino_exec("SHOW TABLES FROM raw.bronze")
+    _show_tables("bronze")
 
 
 @bronze_app.command("count")
 def bronze_count(
-    table: str = typer.Argument(..., help="Table name in raw.bronze"),
+    table: str = typer.Argument(..., help="Bronze dataset name"),
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
 ) -> None:
-    """
-    Shows row count for a Bronze table.
-    """
-    trino_exec(f"SELECT count(*) AS n FROM raw.bronze.{table}")
+    _show_count("bronze", project, table)
 
 
 @bronze_app.command("sample")
 def bronze_sample(
-    table: str = typer.Argument(..., help="Table name in raw.bronze"),
+    table: str = typer.Argument(..., help="Bronze dataset name"),
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
     limit: int = typer.Option(5, "--limit", "-n", help="Number of rows to show"),
 ) -> None:
-    """
-    Shows sample rows from a Bronze table.
-    """
-    trino_exec(f"SELECT * FROM raw.bronze.{table} LIMIT {limit}")
+    _show_sample("bronze", project, table, limit)
 
 
 @bronze_app.command("describe")
 def bronze_describe(
-    table: str = typer.Argument(..., help="Table name in raw.bronze"),
+    table: str = typer.Argument(..., help="Bronze dataset name"),
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
 ) -> None:
-    """
-    Describes columns and types for a Bronze table.
-    """
-    trino_exec(f"DESCRIBE raw.bronze.{table}")
+    _show_describe("bronze", project, table)
 
 
 # ======================================================================================================================
@@ -516,93 +587,196 @@ def bronze_describe(
 # ======================================================================================================================
 
 @silver_app.command("register")
-def silver_register(table: str):
+def silver_register(
+    table: str = typer.Argument(..., help="Silver dataset name"),
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
+) -> None:
     """
     Register a Silver table in Trino and sync partitions.
     """
+    target = _layer_table("silver", project, table)
+    location = _layer_location("silver", project, table)
+
     create_sql = f"""
-    CREATE TABLE IF NOT EXISTS raw.silver.{table} (
+    CREATE TABLE IF NOT EXISTS {target} (
         event_id bigint,
         ingest_ts timestamp,
         event_date date
     )
     WITH (
-        external_location='s3a://aether-lakehouse/silver/acp/{table}/',
+        external_location='{location}',
         format='PARQUET',
         partitioned_by = ARRAY['event_date']
     )
     """
     trino_exec(create_sql)
 
-    typer.echo("Silver table registered")
+    console.print(f"[green]Registered[/green] {target}")
 
     sync_sql = f"""
     CALL raw.system.sync_partition_metadata(
         'silver',
-        '{table}',
+        '{project}_{table}',
         'FULL'
     )
     """
     trino_exec(sync_sql)
 
-    typer.echo("Partitions synchronized")
+    console.print("[green]Partitions synchronized[/green]")
 
 
 @silver_app.command("sync")
-def silver_sync(table: str):
+def silver_sync(
+    table: str = typer.Argument(..., help="Silver dataset name"),
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
+) -> None:
     """
     Synchronize Hive partitions for a Silver table.
     """
     sql = f"""
     CALL raw.system.sync_partition_metadata(
         'silver',
-        '{table}',
+        '{project}_{table}',
         'FULL'
     )
     """
     trino_exec(sql)
 
-    typer.echo("Partitions synchronized")
+    console.print("[green]Partitions synchronized[/green]")
 
 
-@silver_app.command("sync")
-def silver_sync(table: str):
+@silver_app.command("ls")
+def silver_ls() -> None:
     """
-    Synchronize Hive partitions for a Silver table.
+    Lists tables in raw.silver.
     """
-    sql = f"""
-    CALL raw.system.sync_partition_metadata(
-        'silver',
-        '{table}',
-        'FULL'
-    )
-    """
-    trino_exec(sql)
-
-    typer.echo("Partitions synchronized")
+    _show_tables("silver")
 
 
 @silver_app.command("count")
-def silver_count(table: str):
-    sql = f"""
-    SELECT count(*) FROM raw.silver.{table}
-    """
-    trino_exec(sql)
+def silver_count(
+    table: str = typer.Argument(..., help="Silver dataset name"),
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
+) -> None:
+    _show_count("silver", project, table)
 
 
 @silver_app.command("sample")
-def silver_sample(table: str):
-    sql = f"""
-    SELECT * FROM raw.silver.{table} LIMIT 10
+def silver_sample(
+    table: str = typer.Argument(..., help="Silver dataset name"),
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
+    limit: int = typer.Option(10, "--limit", "-n", help="Number of rows to show"),
+) -> None:
+    _show_sample("silver", project, table, limit)
+
+
+@silver_app.command("describe")
+def silver_describe(
+    table: str = typer.Argument(..., help="Silver dataset name"),
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
+) -> None:
+    _show_describe("silver", project, table)
+
+
+# ======================================================================================================================
+# Gold Commands
+# ======================================================================================================================
+
+@gold_app.command("ls")
+def gold_ls(
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
+) -> None:
     """
+    Display available Gold models for a project.
+    """
+    model_dir = _project_model_dir(GOLD_SQL_DIR, project)
+    models = _list_sql_models(model_dir)
+
+    console.print(f"=====| Available Gold Models [{project}] |=====")
+
+    if not models:
+        console.print("[yellow]No Gold SQL models found.[/yellow]")
+        return
+
+    for model in models:
+        console.print(f"- {model}")
+
+
+@gold_app.command("build")
+def gold_build(
+    model: str = typer.Argument(..., help="Gold model name"),
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
+) -> None:
+    """
+    Build a single Gold model.
+    """
+    model_dir = _project_model_dir(GOLD_SQL_DIR, project)
+    path = _sql_model_path(model_dir, model)
+
+    if not path.exists():
+        console.print(f"[red]Gold model not found:[/red] {project}/{model}")
+        raise typer.Exit(code=2)
+
+    console.print(f"=====| Building Gold Model: {project}/{model} |=====")
+
+    sql = _read_sql_file(path)
     trino_exec(sql)
 
+    console.print(f"[green]Gold model built successfully:[/green] {project}/{model}")
+
+
+@gold_app.command("build-all")
+def gold_build_all(
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
+) -> None:
+    """
+    Build all Gold models for a project.
+    """
+    model_dir = _project_model_dir(GOLD_SQL_DIR, project)
+    models = _list_sql_models(model_dir)
+
+    if not models:
+        console.print("[yellow]No Gold SQL models found.[/yellow]")
+        return
+
+    console.print(f"=====| Building All Gold Models [{project}] |=====")
+
+    for model in models:
+        path = _sql_model_path(model_dir, model)
+        console.print(f"[cyan]Running:[/cyan] {model}")
+        sql = _read_sql_file(path)
+        trino_exec(sql)
+
+    console.print(f"[green]All Gold models built successfully for project:[/green] {project}")
+
+
+@gold_app.command("count")
+def gold_count(
+    model: str = typer.Argument(..., help="Gold model name"),
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
+) -> None:
+    _show_count("gold", project, model)
+
+
+@gold_app.command("sample")
+def gold_sample(
+    model: str = typer.Argument(..., help="Gold model name"),
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
+    limit: int = typer.Option(10, "--limit", "-n", help="Number of rows to show"),
+) -> None:
+    _show_sample("gold", project, model, limit)
+
+
+@gold_app.command("describe")
+def gold_describe(
+    model: str = typer.Argument(..., help="Gold model name"),
+    project: str = typer.Option(DEFAULT_PROJECT, "--project", help="Project/domain name"),
+) -> None:
+    _show_describe("gold", project, model)
 
 # ======================================================================================================================
-# 
+
 # ======================================================================================================================
-
-
 
 
 
