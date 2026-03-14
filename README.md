@@ -230,6 +230,10 @@ ACP will launch the full stack:
 | `aether down`   | Stop platform  |
 | `aether status` | Check services |
 
+More commands documented in:
+
+docs/cli_manual.md
+
 
 ---
 
@@ -250,21 +254,30 @@ ACP will launch the full stack:
 
 AETHER Cloud Platform is currently under active development.
 
-Working components:
+### Working Components
 
-- MinIO lakehouse storage
-- Redpanda streaming platform
 - Docker-based platform orchestration
-- Initial CLI framework
+- MinIO lakehouse object storage
+- Redpanda streaming platform
+- Spark compute environment
+- Platform CLI (`aether`)
+- Initial data pipeline (ODIN aviation analytics)
 
-In progress:
+### Recently Implemented
 
-- Spark compute layer
-- Trino query integration
-- Example pipelines
+- Spark ingestion helper
+- Bronze → Silver → Gold pipeline structure
+- Gold analytics dataset generation
+- Airflow orchestration integration
+- CLI data inspection tools
 
+### In Progress
+
+- Trino query layer integration
+- Additional pipelines
+- Platform observability dashboards
+- Expanded CLI capabilities
 ---
-
 
 
 ## Why This Project Matters
@@ -279,3 +292,21 @@ AETHER Cloud Platform demonstrates how modern data infrastructure is built:
 
 Rather than isolated tutorials, ACP shows **how the components integrate into a cohesive platform architecture.**
 
+---
+
+
+## Development Log
+
+ACP is developed incrementally with milestone-based development logs.
+
+Major architectural updates and implementation details can be found in:
+
+
+docs/devlog/
+
+Each devlog documents:
+
+- architectural decisions
+- infrastructure changes
+- pipeline implementations
+- debugging and fixes
